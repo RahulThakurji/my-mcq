@@ -641,14 +641,16 @@ function Quiz() {
               {!isRetakeMode && (
                 <canvas
                   ref={el => canvasRefs.current[index] = el}
-                  onMouseDown={(e) => startDrawing(e, index)}
-                  onMouseMove={(e) => draw(e, index)}
-                  onMouseUp={() => stopDrawing(index)}
-                  onMouseOut={() => stopDrawing(index)}
+                  onPointerDown={(e) => { e.target.setPointerCapture(e.pointerId); startDrawing(e, index); }}
+                  onPointerMove={(e) => draw(e, index)}
+                  onPointerUp={(e) => { e.target.releasePointerCapture(e.pointerId); stopDrawing(index); }}
+                  onPointerOut={() => stopDrawing(index)}
+                  onPointerCancel={() => stopDrawing(index)}
                   style={{
                     position: "absolute", top: 0, left: 0, zIndex: 10,
                     opacity: 1,
                     pointerEvents: isDrawingMode ? "auto" : "none",
+                    touchAction: "none",
                     cursor: isDrawingMode ? (drawTool === 'eraser' ? 'cell' : 'crosshair') : 'default'
                   }}
                 />
