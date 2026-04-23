@@ -280,11 +280,16 @@ function Quiz() {
     if (!isSubmitted && !showExp[index]) return;
 
     activeCanvasIndex.current = index;
-    const { offsetX, offsetY, clientX, clientY } = nativeEvent;
+    const { clientX, clientY } = nativeEvent;
     lastPos.current = { x: clientX, y: clientY };
 
     const canvas = canvasRefs.current[index];
     if (!canvas) return;
+    
+    const rect = canvas.getBoundingClientRect();
+    const offsetX = clientX - rect.left;
+    const offsetY = clientY - rect.top;
+
     const ctx = canvas.getContext('2d');
 
     isDrawing.current = true;
@@ -312,10 +317,13 @@ function Quiz() {
   const draw = (e, index) => {
     const { nativeEvent } = e;
     if (!isDrawing.current || !isDrawingMode || activeCanvasIndex.current !== index) return;
-    const { offsetX, offsetY } = nativeEvent;
     const canvas = canvasRefs.current[index];
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas?.getContext('2d');
+    if (!ctx || !isDrawing.current) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const offsetX = nativeEvent.clientX - rect.left;
+    const offsetY = nativeEvent.clientY - rect.top;
 
     if (drawTool === 'eraser') {
       ctx.globalCompositeOperation = 'destination-out';
