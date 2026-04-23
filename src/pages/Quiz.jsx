@@ -176,7 +176,7 @@ function Quiz() {
         }
       }
     });
-  }, [current, isDrawingMode, quizData, isSubmitted, isInitialLoadComplete, drawings]);
+  }, [current, isDrawingMode, quizData, isSubmitted, isInitialLoadComplete, drawings, showExp]);
 
   // --- Core Navigation ---
   const handleQuestionChange = (newIndex) => {
@@ -816,7 +816,7 @@ function Quiz() {
                   onPointerOut={() => stopDrawing(index)}
                   onPointerCancel={() => stopDrawing(index)}
                   style={{
-                    position: "absolute", top: 0, left: 0, zIndex: 10,
+                    position: "absolute", top: 0, left: 0, zIndex: 20,
                     opacity: 1,
                     pointerEvents: isDrawingMode ? "auto" : "none",
                     touchAction: "none",
@@ -877,7 +877,7 @@ function Quiz() {
               })}
 
               {!isRetakeMode && (isSubmitted || showExp[index]) && q.explanation && (
-                <div style={{ marginTop: "20px", position: "relative", zIndex: isDrawingMode ? 0 : 11 }}>
+                <div style={{ marginTop: "20px", position: "relative", zIndex: 10 }}>
 
                   {/* Original Explanation with Highlighter support */}
                   <strong>Explanation <span style={{ color: "#666", fontSize: "0.9rem", fontWeight: "normal" }}>{isHighlightMode ? "(Drag to highlight)" : ""}</span>:</strong>
