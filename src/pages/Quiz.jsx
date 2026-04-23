@@ -862,6 +862,7 @@ function Quiz() {
                   WebkitUserSelect: isDrawingMode ? "none" : "auto",
                   WebkitTouchCallout: "none",
                   cursor: isDrawingMode ? (drawTool === 'eraser' ? 'cell' : 'crosshair') : 'default'
+                }}
               >
               {!isRetakeMode && (
                 <canvas
