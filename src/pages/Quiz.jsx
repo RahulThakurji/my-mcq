@@ -825,7 +825,15 @@ function Quiz() {
                 onPointerUp={(e) => { if (isDrawing.current) { e.currentTarget.releasePointerCapture(e.pointerId); stopDrawing(index); } }}
                 onPointerOut={(e) => { if (isDrawing.current) stopDrawing(index); }}
                 onPointerCancel={(e) => { if (isDrawing.current) stopDrawing(index); }}
-                style={{ position: "relative", padding: "30px", paddingBottom: showAll ? "70px" : "30px", marginBottom: "0", borderBottom: showAll && index < questions.length - 1 ? "2px dashed #eee" : "none" }}
+                style={{
+                  position: "relative", padding: "30px", paddingBottom: showAll ? "70px" : "30px", marginBottom: "0",
+                  borderBottom: showAll && index < questions.length - 1 ? "2px dashed #eee" : "none",
+                  touchAction: isDrawingMode ? "none" : "auto",
+                  userSelect: isDrawingMode ? "none" : "auto",
+                  WebkitUserSelect: isDrawingMode ? "none" : "auto",
+                  WebkitTouchCallout: "none",
+                  cursor: isDrawingMode ? (drawTool === 'eraser' ? 'cell' : 'crosshair') : 'default'
+                }}
               >
               {!isRetakeMode && (
                 <canvas
