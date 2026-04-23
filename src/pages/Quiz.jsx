@@ -639,7 +639,7 @@ function Quiz() {
   const toolFrameStyle = { display: "flex", gap: "8px", alignItems: "center", background: "#fff", padding: "6px 12px", border: "1px solid #ccc", borderRadius: "6px", boxShadow: "0 1px 3px rgba(0,0,0,0.1)" };
 
   return (
-    <div style={{ padding: "20px", fontFamily: "Arial", maxWidth: "794px", margin: "0 auto", userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none" }}>
+    <div style={{ padding: "20px", paddingBottom: "100px", fontFamily: "Arial", maxWidth: "794px", margin: "0 auto", userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none" }}>
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h2>{subjName} - {chapterName}</h2>
@@ -654,10 +654,18 @@ function Quiz() {
           wrap: {
             display: "flex", flexWrap: "wrap", gap: "10px", padding: "12px 16px",
             background: "linear-gradient(135deg, #1e1e2e 0%, #2a2a3e 100%)",
-            borderRadius: "14px", marginBottom: "22px", alignItems: "center",
-            boxShadow: "0 4px 24px rgba(0,0,0,0.18)",
-            border: (isDrawingMode || isHighlightMode) ? "1.5px solid #7c6fff" : "1.5px solid transparent",
-            transition: "border 0.3s ease"
+            borderRadius: "14px", 
+            position: "fixed",
+            bottom: "20px",
+            left: "50%",
+            transform: "translateX(-50%)",
+            zIndex: 1000,
+            width: "max-content",
+            maxWidth: "95vw",
+            alignItems: "center",
+            boxShadow: "0 8px 32px rgba(0,0,0,0.3)",
+            border: (isDrawingMode || isHighlightMode) ? "1.5px solid #7c6fff" : "1.5px solid rgba(255,255,255,0.1)",
+            transition: "all 0.3s ease"
           },
           pill: (active, from, to) => ({
             display: "inline-flex", alignItems: "center", gap: "6px",
