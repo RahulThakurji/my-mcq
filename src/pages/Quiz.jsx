@@ -1,11 +1,13 @@
 import { useParams, useNavigate } from 'react-router-dom';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import { loadQuiz } from '../utils/loadQuiz';
 import { useAuth } from '../context/AuthContext';
 import { doc, setDoc, getDoc, updateDoc, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
+import ReactQuill from 'react-quill';
+import 'react-quill/dist/quill.snow.css';
 
 function Quiz() {
   const { subjectName, chapterId } = useParams();
@@ -22,6 +24,7 @@ function Quiz() {
   const [selectedAnswers, setSelectedAnswers] = useState({});
   const [showExp, setShowExp] = useState({});
   const [savedExplanations, setSavedExplanations] = useState({});
+  const [notes, setNotes] = useState({});
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [isInitialLoadComplete, setIsInitialLoadComplete] = useState(false);
 
@@ -80,6 +83,7 @@ function Quiz() {
         const data = docSnap.data();
         if (data.drawings !== undefined) setDrawings(data.drawings);
         if (data.savedExplanations !== undefined) setSavedExplanations(data.savedExplanations);
+        if (data.notes !== undefined) setNotes(data.notes);
         if (data.selectedAnswers !== undefined) setSelectedAnswers(data.selectedAnswers);
         if (data.showExp !== undefined) setShowExp(data.showExp);
         if (data.current !== undefined) setCurrent(data.current);
@@ -758,7 +762,9 @@ function Quiz() {
 
               {!isRetakeMode && (isSubmitted || showExp[index]) && q.explanation && (
                 <div style={{ marginTop: "20px", position: "relative", zIndex: isDrawingMode ? 0 : 11 }}>
-                  <strong>Explanation <span style={{ color: "#666", fontSize: "0.9rem", fontWeight: "normal" }}>(Select text to highlight)</span>:</strong>
+
+                  {/* Original Explanation with Highlighter support */}
+                  <strong>Explanation <span style={{ color: "#666", fontSize: "0.9rem", fontWeight: "normal" }}>{isHighlightMode ? "(Drag to highlight)" : ""}</span>:</strong>
                   <div
                     ref={el => explanationRefs.current[index] = el}
                     contentEditable={isHighlightMode}
@@ -772,10 +778,42 @@ function Quiz() {
                     dangerouslySetInnerHTML={{ __html: savedExplanations[index] ? savedExplanations[index] : `<span>${q.explanation}</span>` }}
                   />
                   {savedExplanations[index] && (
-                    <button onClick={() => clearHighlight(index)} disabled={isDrawingMode} style={{ marginTop: "10px", padding: "4px 8px", fontSize: "0.85rem", cursor: "pointer" }}>
+                    <button onClick={() => clearHighlight(index)} disabled={isDrawingMode} style={{ marginTop: "6px", padding: "4px 8px", fontSize: "0.82rem", cursor: "pointer" }}>
                       Clear Highlight
                     </button>
                   )}
+
+                  {/* Apple Notes-style Rich Text Notes Editor */}
+                  <div style={{ marginTop: "16px" }}>
+                    <strong style={{ fontSize: "0.95rem", color: "#444" }}>📝 My Notes:</strong>
+                    <div style={{ marginTop: "6px", borderRadius: "6px", overflow: "hidden", border: "1px solid #d0d0d0", background: "#fff" }}>
+                      <ReactQuill
+                        theme="snow"
+                        value={notes[index] || ""}
+                        onChange={(content) => {
+                          setNotes(prev => {
+                            const updated = { ...prev, [index]: content };
+                            syncToCloud({ notes: updated });
+                            return updated;
+                          });
+                        }}
+                        readOnly={isDrawingMode}
+                        modules={{
+                          toolbar: [
+                            [{ header: [1, 2, 3, false] }],
+                            ['bold', 'italic', 'underline', 'strike'],
+                            [{ color: [] }, { background: [] }],
+                            [{ list: 'ordered' }, { list: 'bullet' }, { list: 'check' }],
+                            ['blockquote', 'code-block'],
+                            ['link', 'image'],
+                            ['clean']
+                          ]
+                        }}
+                        style={{ minHeight: "160px", fontSize: "0.95rem" }}
+                      />
+                    </div>
+                  </div>
+
                 </div>
               )}
             </div>
