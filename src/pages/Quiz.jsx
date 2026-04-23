@@ -30,8 +30,9 @@ function Quiz() {
   const [retakeAnswers, setRetakeAnswers] = useState({});
   const [retakeSubmitted, setRetakeSubmitted] = useState(false);
 
-  // --- Drawing State ---
+  // --- Drawing & Highlight State ---
   const [isDrawingMode, setIsDrawingMode] = useState(false);
+  const [isHighlightMode, setIsHighlightMode] = useState(false);
   const [drawTool, setDrawTool] = useState('pen');
   const [penColor, setPenColor] = useState('#ff0000');
   const [highlightColor, setHighlightColor] = useState('#ffff00');
@@ -444,9 +445,10 @@ function Quiz() {
     }
   };
 
-  // --- Text Highlight Logic (ALWAYS ON) ---
+  // --- Text Highlight Logic ---
   const handleMouseUp = (index) => {
-    if (isDrawingMode) return;
+    if (isDrawingMode || !isHighlightMode) return;
+
     const selection = window.getSelection();
     if (!selection || selection.rangeCount === 0) return;
     const range = selection.getRangeAt(0);
@@ -561,26 +563,35 @@ function Quiz() {
       {!isRetakeMode && (
         <div style={{
           display: "flex", flexWrap: "wrap", gap: "15px", padding: "15px",
-          background: isDrawingMode ? "#e3f2fd" : "#f5f5f5",
+          background: (isDrawingMode || isHighlightMode) ? "#e3f2fd" : "#f5f5f5",
           borderRadius: "8px", marginBottom: "20px", alignItems: "center",
-          border: isDrawingMode ? "2px solid #2196f3" : "2px solid transparent",
+          border: (isDrawingMode || isHighlightMode) ? "2px solid #2196f3" : "2px solid transparent",
           transition: "all 0.3s ease"
         }}>
 
           <button
-            onClick={() => setIsDrawingMode(!isDrawingMode)}
+            onClick={() => { setIsDrawingMode(!isDrawingMode); setIsHighlightMode(false); }}
             style={{ ...btnBase, background: isDrawingMode ? "#f44336" : "#2196f3", color: "white" }}
           >
-            {isDrawingMode ? "Close Scratchpad ❌" : "Use Scratchpad ✏️"}
+            {isDrawingMode ? "Close Pen ❌" : "Use Pen 🖋️"}
           </button>
 
-          {/* Highlighter Frame (Always visible) */}
-          <div style={{ ...toolFrameStyle, opacity: isDrawingMode ? 0.5 : 1 }}>
-            <span style={{ fontSize: "0.85rem", fontWeight: "bold", color: "#555" }}>Highlight:</span>
-            <button onClick={() => setHighlightColor('#ffff00')} style={{ ...colorBtn(highlightColor === '#ffff00'), background: "#ffff00" }} title="Yellow"></button>
-            <button onClick={() => setHighlightColor('#b2ff59')} style={{ ...colorBtn(highlightColor === '#b2ff59'), background: "#b2ff59" }} title="Green"></button>
-            <button onClick={() => setHighlightColor('#ff8a80')} style={{ ...colorBtn(highlightColor === '#ff8a80'), background: "#ff8a80" }} title="Pink"></button>
-          </div>
+          <button
+            onClick={() => { setIsHighlightMode(!isHighlightMode); setIsDrawingMode(false); }}
+            style={{ ...btnBase, background: isHighlightMode ? "#f44336" : "#ff9800", color: "white" }}
+          >
+            {isHighlightMode ? "Close Highlighter ❌" : "Use Highlighter 🖍️"}
+          </button>
+
+          {/* Highlighter Frame (Only visible when highlight mode) */}
+          {isHighlightMode && (
+            <div style={toolFrameStyle}>
+              <span style={{ fontSize: "0.85rem", fontWeight: "bold", color: "#555" }}>Color:</span>
+              <button onClick={() => setHighlightColor('#ffff00')} style={{ ...colorBtn(highlightColor === '#ffff00'), background: "#ffff00" }} title="Yellow"></button>
+              <button onClick={() => setHighlightColor('#b2ff59')} style={{ ...colorBtn(highlightColor === '#b2ff59'), background: "#b2ff59" }} title="Green"></button>
+              <button onClick={() => setHighlightColor('#ff8a80')} style={{ ...colorBtn(highlightColor === '#ff8a80'), background: "#ff8a80" }} title="Pink"></button>
+            </div>
+          )}
 
           {/* Pen Tools Frame (Only visible when drawing) */}
           {isDrawingMode && (
@@ -699,12 +710,12 @@ function Quiz() {
                   <strong>Explanation <span style={{ color: "#666", fontSize: "0.9rem", fontWeight: "normal" }}>(Select text to highlight)</span>:</strong>
                   <div
                     ref={el => explanationRefs.current[index] = el}
-                    contentEditable={!isDrawingMode}
+                    contentEditable={isHighlightMode}
                     suppressContentEditableWarning
                     onMouseUp={() => handleMouseUp(index)}
                     style={{
                       border: "1px solid #ccc", borderRadius: "4px", padding: "15px", marginTop: "5px", background: "#fff8e1",
-                      cursor: isDrawingMode ? "default" : "text", userSelect: isDrawingMode ? "none" : "auto"
+                      cursor: isHighlightMode ? "text" : "default", userSelect: isDrawingMode ? "none" : "auto"
                     }}
                     dangerouslySetInnerHTML={{ __html: savedExplanations[index] ? savedExplanations[index] : `<span>${q.explanation}</span>` }}
                   />
