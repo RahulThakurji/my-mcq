@@ -274,6 +274,10 @@ function Quiz() {
       alert("Please log in with Google to save your notes permanently. Your current drawings will only be saved temporarily.");
       window.hasAlertedForLoginScratchpad = true;
     }
+
+    // Lock drawing behind explanation reveal
+    if (!isSubmitted && !showExp[index]) return;
+
     activeCanvasIndex.current = index;
     const { offsetX, offsetY } = nativeEvent;
 
@@ -537,6 +541,7 @@ function Quiz() {
 
   // --- Text Highlight Logic ---
   const handleMouseUp = (index) => {
+    if (!isSubmitted && !showExp[index]) return; // Lock highlighting behind explanation
     if (isDrawingMode || !isHighlightMode) return;
 
     const selection = window.getSelection();
@@ -650,7 +655,7 @@ function Quiz() {
       </div>
 
       {/* ─── Modern Toolbar ─── */}
-      {!isRetakeMode && (() => {
+      {!isRetakeMode && (isSubmitted || showExp[current]) && (() => {
         const tb = {
           wrap: {
             display: "flex", flexWrap: "wrap", gap: "8px", padding: "8px 12px",
@@ -811,6 +816,7 @@ function Quiz() {
                 ref={el => questionContainersRef.current[index] = el}
                 onPointerDown={(e) => {
                   if (isDrawingMode && e.target.tagName !== 'BUTTON' && e.target.tagName !== 'INPUT' && e.target.tagName !== 'SELECT') {
+                    if (!isSubmitted && !showExp[index]) return; // Lock drawing
                     e.currentTarget.setPointerCapture(e.pointerId);
                     startDrawing(e, index);
                   }
