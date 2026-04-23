@@ -639,7 +639,7 @@ function Quiz() {
   const toolFrameStyle = { display: "flex", gap: "8px", alignItems: "center", background: "#fff", padding: "6px 12px", border: "1px solid #ccc", borderRadius: "6px", boxShadow: "0 1px 3px rgba(0,0,0,0.1)" };
 
   return (
-    <div style={{ padding: "20px", paddingBottom: "100px", fontFamily: "Arial", maxWidth: "794px", margin: "0 auto", userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none" }}>
+    <div style={{ padding: "20px", paddingBottom: "100px", fontFamily: "Arial", maxWidth: "1100px", margin: "0 auto", userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none" }}>
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h2>{subjName} - {chapterName}</h2>
@@ -795,18 +795,21 @@ function Quiz() {
       })()}
 
 
-      {/* Quiz Area */}
-      <div style={{ background: "white", minHeight: "300px" }}>
-        {questions.map((q, index) => {
-          const showAll = isSubmitted && !isRetakeMode;
-          if (!showAll && index !== current) return null;
+      {/* Main Content Area with Sidebar */}
+      <div style={{ display: "flex", gap: "25px", alignItems: "flex-start", marginTop: "20px" }}>
+        
+        {/* Quiz Area */}
+        <div style={{ flex: 1, background: "white", minHeight: "400px", borderRadius: "12px", boxShadow: "0 2px 10px rgba(0,0,0,0.05)", border: "1px solid #eee", padding: "20px", position: "relative" }}>
+          {questions.map((q, index) => {
+            const showAll = isSubmitted && !isRetakeMode;
+            if (!showAll && index !== current) return null;
 
-          return (
-            <div
-              key={index}
-              ref={el => questionContainersRef.current[index] = el}
-              style={{ position: "relative", padding: "10px", marginBottom: showAll ? "40px" : "0", borderBottom: showAll && index < questions.length - 1 ? "2px dashed #ccc" : "none" }}
-            >
+            return (
+              <div
+                key={index}
+                ref={el => questionContainersRef.current[index] = el}
+                style={{ position: "relative", padding: "10px", marginBottom: showAll ? "60px" : "0", borderBottom: showAll && index < questions.length - 1 ? "2px dashed #eee" : "none" }}
+              >
               {!isRetakeMode && (
                 <canvas
                   ref={el => canvasRefs.current[index] = el}
@@ -907,29 +910,57 @@ function Quiz() {
             </div>
           );
         })}
+        </div>
+
+        {/* Sidebar Question Palette */}
+        <div style={{
+          width: "260px", position: "sticky", top: "20px", background: "#fff",
+          borderRadius: "14px", border: "1px solid #eee", padding: "18px",
+          boxShadow: "0 4px 15px rgba(0,0,0,0.03)", display: (isSubmitted && !isRetakeMode) ? "none" : "block"
+        }}>
+          <h3 style={{ fontSize: "1rem", marginBottom: "15px", color: "#333", borderBottom: "1px solid #eee", paddingBottom: "10px", display: "flex", justifyContent: "space-between" }}>
+            Palette <span>{questions.length} Qs</span>
+          </h3>
+          
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: "8px" }}>
+            {questions.map((_, index) => {
+              const isAnswered = isRetakeMode ? retakeAnswers[index] !== undefined : selectedAnswers[index] !== undefined;
+              const isCurrent = current === index;
+              
+              return (
+                <button
+                  key={index}
+                  onClick={() => handleQuestionChange(index)}
+                  style={{
+                    width: "100%", aspectRatio: "1", border: "1px solid #ddd", borderRadius: "8px", cursor: "pointer",
+                    fontWeight: "700", fontSize: "0.82rem",
+                    background: isCurrent ? "#7c6fff" : isAnswered ? "#2ed573" : "#f8f9fa",
+                    color: (isCurrent || isAnswered) ? "white" : "#555",
+                    transition: "all 0.2s ease",
+                    boxShadow: isCurrent ? "0 2px 10px rgba(124,111,255,0.4)" : "none",
+                    transform: isCurrent ? "scale(1.08)" : "none"
+                  }}
+                >
+                  {index + 1}
+                </button>
+              );
+            })}
+          </div>
+
+          <div style={{ marginTop: "25px", paddingTop: "15px", borderTop: "1px solid #eee", fontSize: "0.75rem", fontWeight: "600", color: "#777" }}>
+             <div style={{ display: "flex", gap: "10px", marginBottom: "10px", alignItems: "center" }}>
+                <div style={{ width: "14px", height: "14px", background: "#7c6fff", borderRadius: "4px" }} /> <span>Current Question</span>
+             </div>
+             <div style={{ display: "flex", gap: "10px", marginBottom: "10px", alignItems: "center" }}>
+                <div style={{ width: "14px", height: "14px", background: "#2ed573", borderRadius: "4px" }} /> <span>Answered</span>
+             </div>
+             <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+                <div style={{ width: "14px", height: "14px", background: "#f8f9fa", border: "1px solid #ddd", borderRadius: "4px" }} /> <span>Not Answered</span>
+             </div>
+          </div>
+        </div>
       </div>
 
-      {/* Footer Tracker Navigation */}
-      {(!isSubmitted || isRetakeMode) && (
-        <div style={{ marginTop: "30px", display: "flex", gap: "5px", flexWrap: "wrap" }}>
-          {questions.map((_, index) => {
-            const isAnswered = isRetakeMode ? retakeAnswers[index] !== undefined : selectedAnswers[index] !== undefined;
-            return (
-              <button
-                key={index}
-                onClick={() => handleQuestionChange(index)}
-                style={{
-                  padding: "8px 12px", border: "none", borderRadius: "4px", cursor: "pointer",
-                  background: current === index ? "#2196f3" : isAnswered ? "#4caf50" : "#e0e0e0",
-                  color: current === index || isAnswered ? "white" : "black"
-                }}
-              >
-                {index + 1}
-              </button>
-            );
-          })}
-        </div>
-      )}
 
       {(!isSubmitted || isRetakeMode) && (
         <div style={{ marginTop: "20px", display: "flex", gap: "10px", flexWrap: "wrap" }}>
