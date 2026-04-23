@@ -877,7 +877,8 @@ function Quiz() {
                     ref={el => explanationRefs.current[index] = el}
                     contentEditable={isHighlightMode}
                     suppressContentEditableWarning
-                    onPointerUp={() => handleMouseUp(index)}
+                    onPointerDown={(e) => { if (e.pointerType === 'pen') e.preventDefault(); }}
+                    onPointerUp={(e) => handleMouseUp(index)}
                     onTouchEnd={() => handleMouseUp(index)}
                     style={{
                       border: "1px solid #ccc", borderRadius: "4px", padding: "15px", marginTop: "5px", background: "#fff8e1",
