@@ -921,7 +921,8 @@ function Quiz() {
                       color: color,
                       opacity: opacity,
                       cursor: isDisabled ? "default" : "pointer",
-                      position: "relative"
+                      position: "relative",
+                      touchAction: isDrawingMode ? "none" : "auto"
                     }}
                   >
                     {opt}
