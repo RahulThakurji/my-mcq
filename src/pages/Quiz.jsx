@@ -639,7 +639,7 @@ function Quiz() {
   const toolFrameStyle = { display: "flex", gap: "8px", alignItems: "center", background: "#fff", padding: "6px 12px", border: "1px solid #ccc", borderRadius: "6px", boxShadow: "0 1px 3px rgba(0,0,0,0.1)" };
 
   return (
-    <div style={{ padding: "20px", fontFamily: "Arial", maxWidth: "794px", margin: "0 auto" }}>
+    <div style={{ padding: "20px", fontFamily: "Arial", maxWidth: "794px", margin: "0 auto", userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none" }}>
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h2>{subjName} - {chapterName}</h2>
@@ -880,8 +880,9 @@ function Quiz() {
                     style={{
                       border: "1px solid #ccc", borderRadius: "4px", padding: "15px", marginTop: "5px", background: "#fff8e1",
                       cursor: isHighlightMode ? "text" : "default",
-                      userSelect: (isDrawingMode || !isHighlightMode) ? "none" : "text",
-                      WebkitUserSelect: (isDrawingMode || !isHighlightMode) ? "none" : "text"
+                      userSelect: isHighlightMode ? "text" : "none",
+                      WebkitUserSelect: isHighlightMode ? "text" : "none",
+                      WebkitTouchCallout: "none"
                     }}
                     dangerouslySetInnerHTML={{ __html: savedExplanations[index] ? savedExplanations[index] : `<span>${q.explanation}</span>` }}
                   />
