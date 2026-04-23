@@ -1,16 +1,21 @@
-﻿import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { useState, useEffect, useRef } from 'react';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import { loadQuiz } from '../utils/loadQuiz';
+import { useAuth } from '../context/AuthContext';
+import { doc, setDoc, getDoc, updateDoc, onSnapshot } from 'firebase/firestore';
+import { db } from '../firebase';
 
 function Quiz() {
   const { subjectName, chapterId } = useParams();
   const navigate = useNavigate();
+  const { user, login } = useAuth();
 
   // --- Dynamic Data State ---
   const [quizData, setQuizData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
 
   // --- Quiz Interaction State ---
   const [current, setCurrent] = useState(0);
@@ -18,8 +23,38 @@ function Quiz() {
   const [showExp, setShowExp] = useState({});
   const [savedExplanations, setSavedExplanations] = useState({});
   const [isSubmitted, setIsSubmitted] = useState(false);
+  const [isInitialLoadComplete, setIsInitialLoadComplete] = useState(false);
 
-  const explanationRef = useRef(null);
+  // --- Retake State ---
+  const [isRetakeMode, setIsRetakeMode] = useState(false);
+  const [retakeAnswers, setRetakeAnswers] = useState({});
+  const [retakeSubmitted, setRetakeSubmitted] = useState(false);
+
+  // --- Drawing State ---
+  const [isDrawingMode, setIsDrawingMode] = useState(false);
+  const [drawTool, setDrawTool] = useState('pen');
+  const [penColor, setPenColor] = useState('#ff0000');
+  const [highlightColor, setHighlightColor] = useState('#ffff00');
+
+  const [drawings, setDrawings] = useState({});
+
+  const canvasRefs = useRef({});
+  const questionContainersRef = useRef({});
+  const explanationRefs = useRef({});
+  const activeCanvasIndex = useRef(null);
+  const isDrawing = useRef(false);
+
+  // Snapshots for shapes
+  const startX = useRef(0);
+  const startY = useRef(0);
+  const snapshot = useRef(null);
+
+  // Auto-Snap Feature Refs
+  const strokePoints = useRef([]);
+  const holdTimeout = useRef(null);
+  const preStrokeSnapshot = useRef(null);
+  const isSnapped = useRef(false);
+  const isHighlightErased = useRef(false);
 
   // Load the specific quiz data
   useEffect(() => {
@@ -29,76 +64,452 @@ function Quiz() {
     });
   }, [subjectName, chapterId]);
 
-  if (loading) return <h2>Loading quiz...</h2>;
-  if (!quizData) return <h2>Quiz not found for {subjectName} chapter {chapterId}</h2>;
+  // Sync progress from Firestore in real-time
+  useEffect(() => {
+    if (!user || !subjectName || !chapterId) {
+      setIsInitialLoadComplete(true);
+      return;
+    }
 
-  const { questions, subjectName: subjName, chapterName } = quizData;
+    const docRef = doc(db, 'users', user.uid, 'quizzes', `${subjectName}-${chapterId}`);
+    const unsubscribe = onSnapshot(docRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        if (data.drawings !== undefined) setDrawings(data.drawings);
+        if (data.savedExplanations !== undefined) setSavedExplanations(data.savedExplanations);
+        if (data.selectedAnswers !== undefined) setSelectedAnswers(data.selectedAnswers);
+        if (data.showExp !== undefined) setShowExp(data.showExp);
+        if (data.current !== undefined) setCurrent(data.current);
 
-  const handleClick = (index) => {
-    if (isSubmitted) return;
-    setSelectedAnswers((prev) => ({ ...prev, [current]: index }));
-    setShowExp((prev) => ({ ...prev, [current]: true }));
+        if (data.isSubmitted !== undefined) {
+          setIsSubmitted(data.isSubmitted);
+        }
+      } else {
+        // No document exists: Hydrate state with defaults and create initial document
+        setCurrent(0);
+        setDrawings({});
+        setSavedExplanations({});
+        setSelectedAnswers({});
+        setShowExp({});
+        setIsSubmitted(false);
+        
+        setDoc(docRef, {
+          current: 0,
+          drawings: {},
+          savedExplanations: {},
+          selectedAnswers: {},
+          showExp: {},
+          isSubmitted: false
+        }).catch(err => console.error("Error creating initial document:", err));
+      }
+      setIsInitialLoadComplete(true);
+    }, (error) => {
+      console.error("Error listening to progress:", error);
+      setIsInitialLoadComplete(true);
+    });
+
+    return () => unsubscribe();
+  }, [user, subjectName, chapterId]);
+
+  // Sync to Cloud helper
+  const syncToCloud = async (updates) => {
+    if (!user) {
+      if (!window.hasAlertedForLoginGeneral) {
+        alert("You are not logged in! Your progress will not be saved to the cloud.");
+        window.hasAlertedForLoginGeneral = true;
+      }
+      return;
+    }
+    const docRef = doc(db, 'users', user.uid, 'quizzes', `${subjectName}-${chapterId}`);
+    try {
+      await updateDoc(docRef, updates);
+    } catch (error) {
+      if (error.code === 'not-found' || error.code === 'firestore/not-found' || String(error).includes('not-found')) {
+        try {
+          await setDoc(docRef, updates);
+        } catch (setDocError) {
+          console.error("Error creating document:", setDocError);
+          alert(`Firestore Error (Create): ${setDocError.message}. Please check your Firebase rules!`);
+        }
+      } else {
+        console.error("Error syncing progress:", error);
+        alert(`Firestore Error (Update): ${error.message}. Please check your Firebase rules!`);
+      }
+    }
   };
 
-  const nextQuestion = () => {
-    if (current < questions.length - 1) setCurrent(current + 1);
+  // Set up Canvas size and RESTORE saved drawings
+  useEffect(() => {
+    if (!quizData) return;
+
+    quizData.questions.forEach((_, index) => {
+      // If we are not in Full Review mode, only process the 'current' canvas
+      if (!isSubmitted && index !== current) return;
+
+      const canvas = canvasRefs.current[index];
+      const container = questionContainersRef.current[index];
+
+      if (canvas && container) {
+        const needsResize = canvas.width !== container.offsetWidth || canvas.height !== container.offsetHeight;
+        if (needsResize || (drawings[index] && canvas.dataset.loaded !== drawings[index])) {
+          if (needsResize) {
+            canvas.width = container.offsetWidth;
+            canvas.height = container.offsetHeight;
+          }
+          const ctx = canvas.getContext('2d');
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+          if (drawings[index]) {
+            const img = new Image();
+            img.src = drawings[index];
+            img.onload = () => ctx.drawImage(img, 0, 0);
+            canvas.dataset.loaded = drawings[index];
+          } else {
+            canvas.dataset.loaded = "empty";
+          }
+        }
+      }
+    });
+  }, [current, isDrawingMode, quizData, isSubmitted, isInitialLoadComplete, drawings]);
+
+  // --- Core Navigation ---
+  const handleQuestionChange = (newIndex) => {
+    setCurrent(newIndex);
+    if (!isRetakeMode) syncToCloud({ current: newIndex });
   };
 
-  const prevQuestion = () => {
-    if (current > 0) setCurrent(current - 1);
+  const nextQuestion = () => { if (current < questions.length - 1) handleQuestionChange(current + 1); };
+  const prevQuestion = () => { if (current > 0) handleQuestionChange(current - 1); };
+
+  const submitQuiz = () => {
+    let newDrawings = drawings;
+    setIsSubmitted(true);
+    syncToCloud({ drawings: newDrawings, isSubmitted: true });
   };
 
-  // --- Highlight Logic ---
-  const handleMouseUp = () => {
-    if (isSubmitted) return;
+  const handleClick = (qIndex, optIndex) => {
+    if (isRetakeMode) {
+      if (retakeSubmitted || retakeAnswers[qIndex] !== undefined) return;
+      setRetakeAnswers(prev => ({ ...prev, [qIndex]: optIndex }));
+      return;
+    }
 
+    if (isSubmitted || isDrawingMode || selectedAnswers[qIndex] !== undefined) return;
+
+    setSelectedAnswers(prevAnswers => {
+      const newSelectedAnswers = { ...prevAnswers, [qIndex]: optIndex };
+
+      setShowExp(prevShowExp => {
+        const newShowExp = { ...prevShowExp, [qIndex]: true };
+        syncToCloud({ selectedAnswers: newSelectedAnswers, showExp: newShowExp });
+        return newShowExp;
+      });
+
+      return newSelectedAnswers;
+    });
+  };
+
+  // --- Smart Shape Recognition Engine ---
+  const snapShape = () => {
+    const points = strokePoints.current;
+    if (points.length < 15) return;
+
+    const start = points[0];
+    const end = points[points.length - 1];
+
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (let p of points) {
+      if (p.x < minX) minX = p.x;
+      if (p.x > maxX) maxX = p.x;
+      if (p.y < minY) minY = p.y;
+      if (p.y > maxY) maxY = p.y;
+    }
+
+    const width = maxX - minX;
+    const height = maxY - minY;
+    const diag = Math.hypot(width, height);
+    const gap = Math.hypot(start.x - end.x, start.y - end.y);
+
+    const canvas = canvasRefs.current[activeCanvasIndex.current];
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    ctx.putImageData(preStrokeSnapshot.current, 0, 0);
+    ctx.beginPath();
+    ctx.strokeStyle = penColor;
+    ctx.lineWidth = 2;
+
+    const isClosedShape = gap < diag * 0.3;
+
+    if (isClosedShape) {
+      const aspect = Math.min(width, height) / Math.max(width, height);
+      if (aspect > 0.7) {
+        const centerX = minX + width / 2;
+        const centerY = minY + height / 2;
+        const radius = Math.max(width, height) / 2;
+        ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+      } else {
+        ctx.rect(minX, minY, width, height);
+      }
+    } else {
+      ctx.moveTo(start.x, start.y);
+      ctx.lineTo(end.x, end.y);
+    }
+
+    ctx.stroke();
+    isSnapped.current = true;
+  };
+
+  // --- Canvas Drawing Logic ---
+  const startDrawing = (e, index) => {
+    const { nativeEvent } = e;
+    if (!isDrawingMode) return;
+    if (!user && !window.hasAlertedForLoginScratchpad) {
+      alert("Please log in with Google to save your notes permanently. Your current drawings will only be saved temporarily.");
+      window.hasAlertedForLoginScratchpad = true;
+    }
+    activeCanvasIndex.current = index;
+    const { offsetX, offsetY } = nativeEvent;
+    const canvas = canvasRefs.current[index];
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+
+    isDrawing.current = true;
+    isSnapped.current = false;
+    startX.current = offsetX;
+    startY.current = offsetY;
+
+    preStrokeSnapshot.current = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    snapshot.current = preStrokeSnapshot.current;
+    strokePoints.current = [{ x: offsetX, y: offsetY }];
+
+    ctx.beginPath();
+    ctx.moveTo(offsetX, offsetY);
+  };
+
+  const draw = (e, index) => {
+    const { nativeEvent } = e;
+    if (!isDrawing.current || !isDrawingMode || activeCanvasIndex.current !== index) return;
+    const { offsetX, offsetY } = nativeEvent;
+    const canvas = canvasRefs.current[index];
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+
+    if (drawTool === 'eraser') {
+      ctx.globalCompositeOperation = 'destination-out';
+      ctx.lineWidth = 25;
+      ctx.lineTo(offsetX, offsetY);
+      ctx.stroke();
+
+      // Erase text highlights underneath the canvas
+      const elementsUnderCursor = document.elementsFromPoint(nativeEvent.clientX, nativeEvent.clientY);
+      const highlightedSpan = elementsUnderCursor.find(el => el.tagName === 'SPAN' && el.style.backgroundColor);
+      if (highlightedSpan) {
+        const expRef = explanationRefs.current[index];
+        if (expRef && expRef.contains(highlightedSpan)) {
+          const parent = highlightedSpan.parentNode;
+          while (highlightedSpan.firstChild) {
+            parent.insertBefore(highlightedSpan.firstChild, highlightedSpan);
+          }
+          parent.removeChild(highlightedSpan);
+          isHighlightErased.current = true;
+        }
+      }
+
+    } else if (drawTool === 'pen') {
+      if (isSnapped.current) return;
+
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.strokeStyle = penColor;
+      ctx.lineWidth = 2;
+      ctx.lineTo(offsetX, offsetY);
+      ctx.stroke();
+
+      strokePoints.current.push({ x: offsetX, y: offsetY });
+      clearTimeout(holdTimeout.current);
+      holdTimeout.current = setTimeout(() => {
+        if (isDrawing.current && !isSnapped.current) snapShape();
+      }, 600);
+
+    } else {
+      ctx.putImageData(snapshot.current, 0, 0);
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.strokeStyle = penColor;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+
+      if (drawTool === 'line') {
+        ctx.moveTo(startX.current, startY.current);
+        ctx.lineTo(offsetX, offsetY);
+      } else if (drawTool === 'rectangle') {
+        const width = offsetX - startX.current;
+        const height = offsetY - startY.current;
+        ctx.rect(startX.current, startY.current, width, height);
+      } else if (drawTool === 'circle') {
+        const radius = Math.sqrt(Math.pow(offsetX - startX.current, 2) + Math.pow(offsetY - startY.current, 2));
+        ctx.arc(startX.current, startY.current, radius, 0, 2 * Math.PI);
+      }
+      ctx.stroke();
+    }
+  };
+
+  const stopDrawing = (index) => {
+    if (activeCanvasIndex.current !== index) return;
+    clearTimeout(holdTimeout.current);
+    const canvas = canvasRefs.current[index];
+    const ctx = canvas?.getContext('2d');
+    if (ctx) ctx.closePath();
+    isDrawing.current = false;
+
+    if (canvas) {
+      const newDrawUrl = canvas.toDataURL();
+      setDrawings(prev => {
+        const newDrawings = { ...prev, [index]: newDrawUrl };
+        if (!isHighlightErased.current) syncToCloud({ drawings: newDrawings });
+        return newDrawings;
+      });
+      canvas.dataset.loaded = newDrawUrl;
+    }
+    
+    if (isHighlightErased.current) {
+      const expRef = explanationRefs.current[index];
+      if (expRef) {
+        setSavedExplanations(prev => {
+          const newExplanations = { ...prev, [index]: expRef.innerHTML };
+          
+          // Sync both drawing and the newly erased explanation state at the same time
+          setDrawings(prevDrawings => {
+             syncToCloud({ drawings: prevDrawings, savedExplanations: newExplanations });
+             return prevDrawings;
+          });
+          
+          return newExplanations;
+        });
+      }
+      isHighlightErased.current = false;
+    }
+
+    activeCanvasIndex.current = null;
+  };
+
+  // --- Clearing Logic ---
+  const clearPage = (index) => {
+    const canvas = canvasRefs.current[index];
+    if (canvas) {
+      canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+      canvas.dataset.loaded = "empty";
+    }
+
+    const expRef = explanationRefs.current[index];
+    if (expRef) {
+      expRef.innerHTML = questions[index].explanation;
+    }
+
+    setDrawings(prev => {
+      const newDrawings = { ...prev };
+      delete newDrawings[index];
+      
+      setSavedExplanations(prevExp => {
+        const newExplanations = { ...prevExp };
+        delete newExplanations[index];
+        
+        syncToCloud({ drawings: newDrawings, savedExplanations: newExplanations });
+        return newExplanations;
+      });
+      
+      return newDrawings;
+    });
+  };
+
+  const clearAnnotations = () => {
+    if (window.confirm("Are you sure you want to clear ALL drawings and highlights from every page?")) {
+      setDrawings({});
+      setSavedExplanations({});
+      setSelectedAnswers({});
+      setShowExp({});
+      setIsSubmitted(false);
+      setCurrent(0);
+
+      questions.forEach((_, index) => {
+        const canvas = canvasRefs.current[index];
+        if (canvas) {
+          canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+          canvas.dataset.loaded = "empty";
+        }
+        const expRef = explanationRefs.current[index];
+        if (expRef) {
+          expRef.innerHTML = questions[index].explanation;
+        }
+      });
+      syncToCloud({ drawings: {}, savedExplanations: {}, selectedAnswers: {}, showExp: {}, isSubmitted: false, current: 0 });
+    }
+  };
+
+  // --- Text Highlight Logic (ALWAYS ON) ---
+  const handleMouseUp = (index) => {
+    if (isDrawingMode) return;
     const selection = window.getSelection();
     if (!selection || selection.rangeCount === 0) return;
-
     const range = selection.getRangeAt(0);
     if (range.toString().length === 0) return;
 
+    if (!user && !window.hasAlertedForLoginHighlight) {
+      alert("Please log in with Google to save your highlights permanently. Your current highlights will only be saved temporarily.");
+      window.hasAlertedForLoginHighlight = true;
+    }
+
     try {
       const span = document.createElement("span");
-      span.style.backgroundColor = "yellow";
-
-      range.surroundContents(span);
+      span.style.backgroundColor = highlightColor;
+      range.surroundContents(span);  // Fixed typo: surroundContents
       selection.removeAllRanges();
 
-      const updatedHTML = explanationRef.current.innerHTML;
+      const expRef = explanationRefs.current[index];
+      if (!expRef) return;
 
-      setSavedExplanations((prev) => ({
-        ...prev,
-        [current]: updatedHTML
-      }));
+      setSavedExplanations(prev => {
+        const newExplanations = { ...prev, [index]: expRef.innerHTML };
+        syncToCloud({ savedExplanations: newExplanations });
+        return newExplanations;
+      });
     } catch (err) {
       console.log(err);
     }
   };
 
-  const clearHighlight = () => {
-    if (isSubmitted) return;
-
-    setSavedExplanations((prev) => {
-      const updated = { ...prev };
-      delete updated[current];
-      return updated;
+  const clearHighlight = (index) => {
+    setSavedExplanations(prev => {
+      const newExplanations = { ...prev };
+      delete newExplanations[index];
+      syncToCloud({ savedExplanations: newExplanations });
+      return newExplanations;
     });
 
-    if (explanationRef.current) {
-      explanationRef.current.innerHTML = questions[current].explanation;
+    const expRef = explanationRefs.current[index];
+    if (expRef) {
+      expRef.innerHTML = questions[index].explanation;
     }
   };
 
-  const clearAllHighlights = () => {
-    setSavedExplanations({});
-    if (explanationRef.current) {
-      explanationRef.current.innerHTML = questions[current].explanation;
-    }
-  };
+  if (loading || !isInitialLoadComplete) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', flexDirection: 'column' }}>
+        <h2>Loading your progress...</h2>
+        <p>Syncing with cloud...</p>
+      </div>
+    );
+  }
+  
+  if (!quizData) return <h2>Quiz not found for {subjectName} chapter {chapterId}</h2>;
+  const { questions, subjectName: subjName, chapterName } = quizData;
 
-  const submitQuiz = () => {
-    setIsSubmitted(true);
+  const hasEditsOnPage = drawings[current] || savedExplanations[current];
+
+  const calculateScore = () => {
+    let score = 0;
+    questions.forEach((q, index) => {
+      if (selectedAnswers[index] === q.correct) score++;
+    });
+    return score;
   };
 
   // --- PDF Logic ---
@@ -107,197 +518,315 @@ function Quiz() {
     const canvas = await html2canvas(element, { scale: 2 });
     const imgData = canvas.toDataURL("image/png");
 
-    const pdf = new jsPDF();
-    
-    // Calculate width and height to fit the page properly
-    const imgWidth = 190; 
-    const pageHeight = 295;  
+    const pdf = new jsPDF('p', 'mm', 'a4');
+    const pdfWidth = pdf.internal.pageSize.getWidth();
+    const pdfHeight = pdf.internal.pageSize.getHeight();
+
+    const margin = 10;
+    const imgWidth = pdfWidth - (margin * 2);
     const imgHeight = (canvas.height * imgWidth) / canvas.width;
+
     let heightLeft = imgHeight;
-    let position = 10;
+    let position = margin;
 
-    pdf.addImage(imgData, "PNG", 10, position, imgWidth, imgHeight);
-    heightLeft -= pageHeight;
+    pdf.addImage(imgData, "PNG", margin, position, imgWidth, imgHeight);
+    heightLeft -= (pdfHeight - (margin * 2));
 
-    // Handle multiple pages if the quiz is long
     while (heightLeft >= 0) {
-      position = heightLeft - imgHeight;
+      position = heightLeft - imgHeight + margin;
       pdf.addPage();
-      pdf.addImage(imgData, "PNG", 10, position, imgWidth, imgHeight);
-      heightLeft -= pageHeight;
+      pdf.addImage(imgData, "PNG", margin, position, imgWidth, imgHeight);
+      heightLeft -= (pdfHeight - (margin * 2));
     }
 
-    pdf.save(`${subjName}-${chapterName}-Quiz.pdf`);
+    pdf.save(`${subjName}-${chapterName}-Notes.pdf`);
   };
 
+  // UI Styles
+  const btnBase = { padding: "8px 16px", border: "none", borderRadius: "4px", cursor: "pointer", fontWeight: "bold" };
+  const colorBtn = (isActive) => ({ width: "24px", height: "24px", borderRadius: "50%", border: isActive ? "3px solid black" : "1px solid #ccc", cursor: "pointer" });
+  const toolFrameStyle = { display: "flex", gap: "8px", alignItems: "center", background: "#fff", padding: "6px 12px", border: "1px solid #ccc", borderRadius: "6px", boxShadow: "0 1px 3px rgba(0,0,0,0.1)" };
+
   return (
-    <div style={{ padding: "20px", fontFamily: "Arial", maxWidth: "800px", margin: "0 auto" }}>
-      
+    <div style={{ padding: "20px", fontFamily: "Arial", maxWidth: "794px", margin: "0 auto" }}>
+
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h2>{subjName} - {chapterName}</h2>
-        <button onClick={() => navigate(`/quizzes/${subjectName}`)}>Back to Chapters</button>
+        <div style={{ display: "flex", gap: "10px" }}>
+          <button onClick={() => navigate(`/quizzes/${subjectName}`)} style={{ padding: "8px 16px", ...btnBase }}>Back to Chapters</button>
+        </div>
       </div>
 
-      <h3>Question {current + 1} / {questions.length}</h3>
-      <p style={{ fontSize: '1.2rem', fontWeight: 'bold' }}>{questions[current].question}</p>
+      {/* Main Toolbar */}
+      {!isRetakeMode && (
+        <div style={{
+          display: "flex", flexWrap: "wrap", gap: "15px", padding: "15px",
+          background: isDrawingMode ? "#e3f2fd" : "#f5f5f5",
+          borderRadius: "8px", marginBottom: "20px", alignItems: "center",
+          border: isDrawingMode ? "2px solid #2196f3" : "2px solid transparent",
+          transition: "all 0.3s ease"
+        }}>
 
-      {/* OPTIONS */}
-      {questions[current].options.map((opt, i) => (
-        <button
-          key={i}
-          onClick={() => handleClick(i)}
-          disabled={isSubmitted}
-          style={{
-            display: "block",
-            margin: "10px 0",
-            padding: "10px",
-            width: "100%",
-            maxWidth: "400px",
-            textAlign: "left",
-            border: "1px solid #ccc",
-            borderRadius: "4px",
-            background:
-              selectedAnswers[current] !== undefined
-                ? i === questions[current].correct
-                  ? "#4caf50" // green
-                  : i === selectedAnswers[current]
-                  ? "#f44336" // red
-                  : "#f9f9f9"
-                : "#f9f9f9",
-            color: selectedAnswers[current] !== undefined && (i === questions[current].correct || i === selectedAnswers[current]) ? "white" : "black",
-            opacity: isSubmitted ? 0.8 : 1,
-            cursor: isSubmitted ? "not-allowed" : "pointer"
-          }}
-        >
-          {opt}
-        </button>
-      ))}
+          <button
+            onClick={() => setIsDrawingMode(!isDrawingMode)}
+            style={{ ...btnBase, background: isDrawingMode ? "#f44336" : "#2196f3", color: "white" }}
+          >
+            {isDrawingMode ? "Close Scratchpad ❌" : "Use Scratchpad ✏️"}
+          </button>
 
-      {/* EXPLANATION */}
-      {showExp[current] && questions[current].explanation && (
-        <div style={{ marginTop: "20px" }}>
-          <strong>Explanation (Highlight important text):</strong>
-          <div
-            ref={explanationRef}
-            contentEditable={!isSubmitted}
-            suppressContentEditableWarning
-            onMouseUp={handleMouseUp}
-            style={{
-              border: "1px solid black",
-              borderRadius: "4px",
-              padding: "15px",
-              marginTop: "10px",
-              minHeight: "60px",
-              background: "#fff8e1" // light yellow background to distinguish it
-            }}
-            dangerouslySetInnerHTML={{
-              __html:
-                savedExplanations[current] ||
-                `<span>${questions[current].explanation}</span>`
-            }}
-          />
-          <div style={{ marginTop: "10px" }}>
-            <button onClick={clearHighlight} disabled={isSubmitted}>
-              Clear Highlight
-            </button>
+          {/* Highlighter Frame (Always visible) */}
+          <div style={{ ...toolFrameStyle, opacity: isDrawingMode ? 0.5 : 1 }}>
+            <span style={{ fontSize: "0.85rem", fontWeight: "bold", color: "#555" }}>Highlight:</span>
+            <button onClick={() => setHighlightColor('#ffff00')} style={{ ...colorBtn(highlightColor === '#ffff00'), background: "#ffff00" }} title="Yellow"></button>
+            <button onClick={() => setHighlightColor('#b2ff59')} style={{ ...colorBtn(highlightColor === '#b2ff59'), background: "#b2ff59" }} title="Green"></button>
+            <button onClick={() => setHighlightColor('#ff8a80')} style={{ ...colorBtn(highlightColor === '#ff8a80'), background: "#ff8a80" }} title="Pink"></button>
           </div>
+
+          {/* Pen Tools Frame (Only visible when drawing) */}
+          {isDrawingMode && (
+            <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+              <select value={drawTool} onChange={(e) => setDrawTool(e.target.value)} style={{ padding: "8px", borderRadius: "4px", border: "1px solid #ccc", outline: "none", fontWeight: "bold" }}>
+                <option value="pen">Pen 🖋️</option>
+                <option value="line">Line 📏</option>
+                <option value="rectangle">Rect ▭</option>
+                <option value="circle">Circle ◯</option>
+                <option value="eraser">Eraser 🧽</option>
+              </select>
+
+              {drawTool !== 'eraser' && (
+                <div style={toolFrameStyle}>
+                  <span style={{ fontSize: "0.85rem", fontWeight: "bold", color: "#555" }}>Ink:</span>
+                  <button onClick={() => setPenColor('#ff0000')} style={{ ...colorBtn(penColor === '#ff0000'), background: "#ff0000" }} title="Red"></button>
+                  <button onClick={() => setPenColor('#2196f3')} style={{ ...colorBtn(penColor === '#2196f3'), background: "#2196f3" }} title="Blue"></button>
+                  <button onClick={() => setPenColor('#4caf50')} style={{ ...colorBtn(penColor === '#4caf50'), background: "#4caf50" }} title="Green"></button>
+                  <button onClick={() => setPenColor('#ff9800')} style={{ ...colorBtn(penColor === '#ff9800'), background: "#ff9800" }} title="Orange"></button>
+                  <button onClick={() => setPenColor('#9c27b0')} style={{ ...colorBtn(penColor === '#9c27b0'), background: "#9c27b0" }} title="Purple"></button>
+                  <button onClick={() => setPenColor('#000000')} style={{ ...colorBtn(penColor === '#000000'), background: "#000000" }} title="Black"></button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {!isSubmitted && hasEditsOnPage && (
+            <button onClick={() => clearPage(current)} style={{ ...btnBase, background: "#fff", border: "1px solid #ccc", color: "#d32f2f", marginLeft: "auto" }}>
+              Erase Page Annotations 🧽
+            </button>
+          )}
         </div>
       )}
 
-      {/* TRACKER */}
-      <div style={{ marginTop: "30px", display: "flex", flexWrap: "wrap", gap: "5px" }}>
-        {questions.map((_, index) => (
-          <button
-            key={index}
-            onClick={() => setCurrent(index)}
-            style={{
-              padding: "8px 12px",
-              border: "none",
-              borderRadius: "4px",
-              cursor: "pointer",
-              background:
-                current === index
-                  ? "#2196f3" // blue
-                  : selectedAnswers[index] !== undefined
-                  ? "#4caf50" // green
-                  : "#e0e0e0",
-              color: current === index || selectedAnswers[index] !== undefined ? "white" : "black"
-            }}
-          >
-            {index + 1}
-          </button>
-        ))}
+      {/* Quiz Area */}
+      <div style={{ background: "white", minHeight: "300px" }}>
+        {questions.map((q, index) => {
+          const showAll = isSubmitted && !isRetakeMode;
+          if (!showAll && index !== current) return null;
+
+          return (
+            <div
+              key={index}
+              ref={el => questionContainersRef.current[index] = el}
+              style={{ position: "relative", padding: "10px", marginBottom: showAll ? "40px" : "0", borderBottom: showAll && index < questions.length - 1 ? "2px dashed #ccc" : "none" }}
+            >
+              {!isRetakeMode && (
+                <canvas
+                  ref={el => canvasRefs.current[index] = el}
+                  onMouseDown={(e) => startDrawing(e, index)}
+                  onMouseMove={(e) => draw(e, index)}
+                  onMouseUp={() => stopDrawing(index)}
+                  onMouseOut={() => stopDrawing(index)}
+                  style={{
+                    position: "absolute", top: 0, left: 0, zIndex: 10,
+                    opacity: 1,
+                    pointerEvents: isDrawingMode ? "auto" : "none",
+                    cursor: isDrawingMode ? (drawTool === 'eraser' ? 'cell' : 'crosshair') : 'default'
+                  }}
+                />
+              )}
+
+              <h3>Question {index + 1} / {questions.length}</h3>
+              <p style={{ fontSize: '1.2rem', fontWeight: 'bold', userSelect: isDrawingMode ? "none" : "auto" }}>
+                {q.question}
+              </p>
+
+              {q.options.map((opt, i) => {
+                let isDisabled = false;
+                let bg = "#f9f9f9";
+                let color = "black";
+                let opacity = 1;
+
+                if (isRetakeMode) {
+                  isDisabled = retakeSubmitted || retakeAnswers[index] !== undefined;
+                  if (retakeAnswers[index] !== undefined) {
+                    if (retakeSubmitted) {
+                      bg = i === q.correct ? "#4caf50" : i === retakeAnswers[index] ? "#f44336" : "#f9f9f9";
+                      color = (i === q.correct || i === retakeAnswers[index]) ? "white" : "black";
+                    } else {
+                      bg = i === retakeAnswers[index] ? "#2196f3" : "#f9f9f9";
+                      color = i === retakeAnswers[index] ? "white" : "black";
+                    }
+                  }
+                  if (retakeSubmitted && retakeAnswers[index] === undefined) opacity = 0.7;
+                } else {
+                  isDisabled = isSubmitted || isDrawingMode || selectedAnswers[index] !== undefined;
+                  if (selectedAnswers[index] !== undefined) {
+                    bg = i === q.correct ? "#4caf50" : i === selectedAnswers[index] ? "#f44336" : "#f9f9f9";
+                    color = (i === q.correct || i === selectedAnswers[index]) ? "white" : "black";
+                  }
+                  if ((isSubmitted || isDrawingMode) && selectedAnswers[index] === undefined) opacity = 0.7;
+                }
+
+                return (
+                  <button
+                    key={i}
+                    onClick={() => handleClick(index, i)}
+                    disabled={isDisabled}
+                    style={{
+                      display: "block", margin: "10px 0", padding: "10px", width: "100%", maxWidth: "500px",
+                      textAlign: "left", border: "1px solid #ccc", borderRadius: "4px",
+                      background: bg,
+                      color: color,
+                      opacity: opacity,
+                      cursor: isDisabled ? "default" : "pointer"
+                    }}
+                  >
+                    {opt}
+                  </button>
+                );
+              })}
+
+              {!isRetakeMode && (isSubmitted || showExp[index]) && q.explanation && (
+                <div style={{ marginTop: "20px", position: "relative", zIndex: isDrawingMode ? 0 : 11 }}>
+                  <strong>Explanation <span style={{ color: "#666", fontSize: "0.9rem", fontWeight: "normal" }}>(Select text to highlight)</span>:</strong>
+                  <div
+                    ref={el => explanationRefs.current[index] = el}
+                    contentEditable={!isDrawingMode}
+                    suppressContentEditableWarning
+                    onMouseUp={() => handleMouseUp(index)}
+                    style={{
+                      border: "1px solid #ccc", borderRadius: "4px", padding: "15px", marginTop: "5px", background: "#fff8e1",
+                      cursor: isDrawingMode ? "default" : "text", userSelect: isDrawingMode ? "none" : "auto"
+                    }}
+                    dangerouslySetInnerHTML={{ __html: savedExplanations[index] ? savedExplanations[index] : `<span>${q.explanation}</span>` }}
+                  />
+                  {savedExplanations[index] && (
+                    <button onClick={() => clearHighlight(index)} disabled={isDrawingMode} style={{ marginTop: "10px", padding: "4px 8px", fontSize: "0.85rem", cursor: "pointer" }}>
+                      Clear Highlight
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
 
-      {/* NAVIGATION & SUBMISSION */}
-      <div style={{ marginTop: "20px", display: "flex", gap: "10px", flexWrap: "wrap" }}>
-        <button onClick={prevQuestion} disabled={current === 0}>
-          Previous
-        </button>
-        <button onClick={nextQuestion} disabled={current === questions.length - 1}>
-          Next
-        </button>
+      {/* Footer Tracker Navigation */}
+      {(!isSubmitted || isRetakeMode) && (
+        <div style={{ marginTop: "30px", display: "flex", gap: "5px", flexWrap: "wrap" }}>
+          {questions.map((_, index) => {
+            const isAnswered = isRetakeMode ? retakeAnswers[index] !== undefined : selectedAnswers[index] !== undefined;
+            return (
+              <button
+                key={index}
+                onClick={() => handleQuestionChange(index)}
+                style={{
+                  padding: "8px 12px", border: "none", borderRadius: "4px", cursor: "pointer",
+                  background: current === index ? "#2196f3" : isAnswered ? "#4caf50" : "#e0e0e0",
+                  color: current === index || isAnswered ? "white" : "black"
+                }}
+              >
+                {index + 1}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
-        {!isSubmitted && current === questions.length - 1 && (
-          <button onClick={submitQuiz} style={{ background: "#ff9800", color: "white", marginLeft: "auto" }}>
-            Submit Quiz
+      {(!isSubmitted || isRetakeMode) && (
+        <div style={{ marginTop: "20px", display: "flex", gap: "10px", flexWrap: "wrap" }}>
+          <button onClick={prevQuestion} disabled={current === 0} style={btnBase}>Previous</button>
+          <button onClick={nextQuestion} disabled={current === questions.length - 1} style={btnBase}>Next</button>
+
+          {current === questions.length - 1 && (!isRetakeMode || !retakeSubmitted) && (
+            <button onClick={() => isRetakeMode ? setRetakeSubmitted(true) : submitQuiz()} style={{ ...btnBase, background: "#ff9800", color: "white", marginLeft: "auto" }}>
+              Submit {isRetakeMode ? "Retake" : "Quiz"}
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* RETAKE SUBMIT ACTIONS */}
+      {isRetakeMode && retakeSubmitted && (
+        <div style={{ marginTop: "30px", padding: "20px", background: "#e3f2fd", borderRadius: "8px", textAlign: "center" }}>
+          <h3 style={{ color: "#1976d2", marginBottom: "15px" }}>Retake Results</h3>
+          {(() => {
+            let correct = 0, wrong = 0, unattempted = 0;
+            questions.forEach((q, index) => {
+              if (retakeAnswers[index] === undefined) unattempted++;
+              else if (retakeAnswers[index] === q.correct) correct++;
+              else wrong++;
+            });
+            return (
+              <div style={{ fontSize: "1.1rem", lineHeight: "1.6" }}>
+                <p>Correct: <strong style={{ color: "#4caf50" }}>{correct}</strong></p>
+                <p>Wrong: <strong style={{ color: "#f44336" }}>{wrong}</strong></p>
+                <p>Unattempted: <strong>{unattempted}</strong></p>
+                <h3 style={{ marginTop: "15px" }}>Score: {correct} / {questions.length}</h3>
+              </div>
+            );
+          })()}
+          <button onClick={() => { setIsRetakeMode(false); setRetakeSubmitted(false); setRetakeAnswers({}); }} style={{ ...btnBase, background: "#1976d2", color: "white", marginTop: "20px", padding: "10px 20px" }}>
+            Exit Retake Mode
           </button>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* AFTER SUBMIT ACTIONS */}
-      {isSubmitted && (
-        <div style={{ marginTop: "30px", padding: "20px", background: "#e8f5e9", borderRadius: "4px" }}>
-          <h3>Quiz Submitted!</h3>
-          <div style={{ display: "flex", gap: "10px" }}>
-            <button onClick={downloadPDF} style={{ background: "#2196f3", color: "white" }}>
-              Download PDF with Highlights
+      {isSubmitted && !isRetakeMode && (
+        <div style={{ marginTop: "30px", padding: "20px", background: "#e8f5e9", borderRadius: "8px", textAlign: "center" }}>
+          <h3 style={{ color: "#2e7d32", marginBottom: "15px" }}>Review Mode</h3>
+          <p style={{ color: "#555", marginBottom: "15px" }}>You can continue adding notes and highlights to any page before downloading.</p>
+          <div style={{ display: "flex", justifyContent: "center", gap: "15px", flexWrap: "wrap" }}>
+            <button onClick={downloadPDF} style={{ ...btnBase, background: "#2196f3", color: "white", fontSize: "1.1rem", padding: "12px 24px" }}>
+              Download Study Notes (PDF) 📥
             </button>
-            <button onClick={clearAllHighlights}>
-              Clear All Highlights
+            <button onClick={() => { setIsRetakeMode(true); setRetakeAnswers({}); setRetakeSubmitted(false); setCurrent(0); }} style={{ ...btnBase, background: "#ff9800", color: "white", fontSize: "1.1rem", padding: "12px 24px" }}>
+              Re-take Quiz 🔄
             </button>
+            <button onClick={clearAnnotations} style={{ ...btnBase, background: "#f44336", color: "white", fontSize: "1.1rem", padding: "12px 24px" }}>
+              Clear All (Fresh Start) 🗑️
+            </button>
+
           </div>
         </div>
       )}
 
       {/* HIDDEN PDF DATA CONTAINER */}
-      <div 
-        id="pdf-container" 
-        style={{ 
-          position: "absolute", 
-          left: "-9999px", 
-          top: "-9999px",
-          width: "800px", 
-          padding: "40px", 
-          background: "white", 
-          color: "black",
-          fontFamily: "Arial"
-        }}
-      >
+      <div id="pdf-container" style={{ position: "absolute", left: "-9999px", top: "-9999px", width: "794px", padding: "40px", background: "white", color: "black", fontFamily: "Arial", boxSizing: "border-box" }}>
         <h2>{subjName} - {chapterName} (Review)</h2>
         <hr />
         {questions.map((q, index) => (
-          <div key={index} style={{ marginBottom: "30px" }}>
-            <h3 style={{ marginBottom: "10px" }}>Q{index + 1}: {q.question}</h3>
-            {q.options.map((opt, i) => (
-              <p key={i} style={{ 
-                margin: "5px 0", 
-                padding: "5px",
-                background: i === q.correct ? "#c8e6c9" : "transparent",
-                fontWeight: i === q.correct ? "bold" : "normal"
-              }}>
-                {i === q.correct ? "✔ " : "○ "} {opt}
-              </p>
-            ))}
-            <div style={{ marginTop: "10px", padding: "10px", borderLeft: "4px solid #ffeb3b", background: "#fdfbf7" }}>
-              <strong>Explanation: </strong>
-              <span
-                dangerouslySetInnerHTML={{
-                  __html:
-                    savedExplanations[index] ||
-                    `<span>${q.explanation}</span>`
-                }}
+          <div key={index} style={{ position: "relative", marginBottom: "30px", paddingBottom: "20px" }}>
+
+            {drawings[index] && (
+              <img
+                src={drawings[index]}
+                alt="notes"
+                style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", zIndex: 5, pointerEvents: "none" }}
               />
+            )}
+
+            <div style={{ position: "relative", zIndex: 1 }}>
+              <h3 style={{ marginBottom: "10px", maxWidth: "700px" }}>Q{index + 1}: {q.question}</h3>
+              {q.options.map((opt, i) => (
+                <p key={i} style={{ margin: "5px 0", padding: "5px", background: i === q.correct ? "#c8e6c9" : "transparent", fontWeight: i === q.correct ? "bold" : "normal", maxWidth: "600px" }}>
+                  {i === q.correct ? "✔ " : "○ "} {opt}
+                </p>
+              ))}
+              <div style={{ marginTop: "10px", padding: "10px", borderLeft: "4px solid #ffeb3b", background: "#fdfbf7", maxWidth: "700px" }}>
+                <strong>Explanation: </strong>
+                <span dangerouslySetInnerHTML={{ __html: savedExplanations[index] || `<span>${q.explanation}</span>` }} />
+              </div>
             </div>
           </div>
         ))}
