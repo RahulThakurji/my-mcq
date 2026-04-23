@@ -58,6 +58,7 @@ function Quiz() {
   const strokePoints = useRef([]);
   const holdTimeout = useRef(null);
   const preStrokeSnapshot = useRef(null);
+  const lastPos = useRef({ x: 0, y: 0 });
   const isSnapped = useRef(false);
   const isHighlightErased = useRef(false);
 
@@ -279,7 +280,8 @@ function Quiz() {
     if (!isSubmitted && !showExp[index]) return;
 
     activeCanvasIndex.current = index;
-    const { offsetX, offsetY } = nativeEvent;
+    const { offsetX, offsetY, clientX, clientY } = nativeEvent;
+    lastPos.current = { x: clientX, y: clientY };
 
     const canvas = canvasRefs.current[index];
     if (!canvas) return;
@@ -401,9 +403,23 @@ function Quiz() {
     }
   };
 
-  const stopDrawing = (index) => {
+  const stopDrawing = (index, clientX, clientY) => {
     if (activeCanvasIndex.current !== index) return;
     clearTimeout(holdTimeout.current);
+
+    // Tap detection for buttons
+    if (isDrawing.current && clientX !== undefined && clientY !== undefined) {
+      const dist = Math.sqrt(Math.pow(clientX - lastPos.current.x, 2) + Math.pow(clientY - lastPos.current.y, 2));
+      if (dist < 5) {
+        const elements = document.elementsFromPoint(clientX, clientY);
+        const targetBtn = elements.find(el => el.getAttribute('data-mcq-btn') === 'true');
+        if (targetBtn) {
+          targetBtn.click();
+        }
+      }
+    }
+
+    isDrawing.current = false;
     const canvas = canvasRefs.current[index];
     const ctx = canvas?.getContext('2d');
     if (ctx) ctx.closePath();
@@ -815,14 +831,19 @@ function Quiz() {
                 key={index}
                 ref={el => questionContainersRef.current[index] = el}
                 onPointerDown={(e) => {
-                  if (isDrawingMode && e.target.tagName !== 'BUTTON' && e.target.tagName !== 'INPUT' && e.target.tagName !== 'SELECT') {
+                  if (isDrawingMode && e.target.tagName !== 'INPUT' && e.target.tagName !== 'SELECT') {
                     if (!isSubmitted && !showExp[index]) return; // Lock drawing
                     e.currentTarget.setPointerCapture(e.pointerId);
                     startDrawing(e, index);
                   }
                 }}
                 onPointerMove={(e) => { if (isDrawing.current) draw(e, index); }}
-                onPointerUp={(e) => { if (isDrawing.current) { e.currentTarget.releasePointerCapture(e.pointerId); stopDrawing(index); } }}
+                onPointerUp={(e) => { 
+                  if (isDrawing.current) { 
+                    e.currentTarget.releasePointerCapture(e.pointerId); 
+                    stopDrawing(index, e.clientX, e.clientY); 
+                  } 
+                }}
                 onPointerOut={(e) => { if (isDrawing.current) stopDrawing(index); }}
                 onPointerCancel={(e) => { if (isDrawing.current) stopDrawing(index); }}
                 style={{
