@@ -714,7 +714,8 @@ function Quiz() {
                     ref={el => explanationRefs.current[index] = el}
                     contentEditable={isHighlightMode}
                     suppressContentEditableWarning
-                    onMouseUp={() => handleMouseUp(index)}
+                    onPointerUp={() => handleMouseUp(index)}
+                    onTouchEnd={() => handleMouseUp(index)}
                     style={{
                       border: "1px solid #ccc", borderRadius: "4px", padding: "15px", marginTop: "5px", background: "#fff8e1",
                       cursor: isHighlightMode ? "text" : "default", userSelect: isDrawingMode ? "none" : "auto"
