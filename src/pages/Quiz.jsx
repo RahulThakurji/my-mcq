@@ -652,54 +652,54 @@ function Quiz() {
       {!isRetakeMode && (() => {
         const tb = {
           wrap: {
-            display: "flex", flexWrap: "wrap", gap: "10px", padding: "12px 16px",
+            display: "flex", flexWrap: "wrap", gap: "8px", padding: "8px 12px",
             background: "linear-gradient(135deg, #1e1e2e 0%, #2a2a3e 100%)",
-            borderRadius: "14px", 
+            borderRadius: "12px", 
             position: "fixed",
-            bottom: "20px",
+            bottom: "15px",
             left: "50%",
             transform: "translateX(-50%)",
             zIndex: 1000,
             width: "max-content",
-            maxWidth: "95vw",
+            maxWidth: "98vw",
             alignItems: "center",
             boxShadow: "0 8px 32px rgba(0,0,0,0.3)",
             border: (isDrawingMode || isHighlightMode) ? "1.5px solid #7c6fff" : "1.5px solid rgba(255,255,255,0.1)",
             transition: "all 0.3s ease"
           },
           pill: (active, from, to) => ({
-            display: "inline-flex", alignItems: "center", gap: "6px",
-            padding: "8px 18px", border: "none", borderRadius: "999px", cursor: "pointer",
-            fontWeight: 700, fontSize: "0.88rem", letterSpacing: "0.01em",
+            display: "inline-flex", alignItems: "center", gap: "5px",
+            padding: "6px 14px", border: "none", borderRadius: "999px", cursor: "pointer",
+            fontWeight: 700, fontSize: "0.82rem", letterSpacing: "0.01em",
             background: active ? `linear-gradient(135deg, ${from}, ${to})` : "rgba(255,255,255,0.08)",
             color: active ? "#fff" : "#ccc",
             boxShadow: active ? `0 2px 12px ${from}55` : "none",
             transition: "all 0.2s ease"
           }),
-          sep: { width: "1px", height: "28px", background: "rgba(255,255,255,0.15)", margin: "0 2px" },
+          sep: { width: "1px", height: "24px", background: "rgba(255,255,255,0.15)", margin: "0 2px" },
           card: {
-            display: "flex", gap: "8px", alignItems: "center",
-            background: "rgba(255,255,255,0.06)", borderRadius: "10px",
-            padding: "6px 12px", border: "1px solid rgba(255,255,255,0.1)"
+            display: "flex", gap: "6px", alignItems: "center",
+            background: "rgba(255,255,255,0.06)", borderRadius: "8px",
+            padding: "4px 10px", border: "1px solid rgba(255,255,255,0.1)"
           },
-          label: { fontSize: "0.75rem", fontWeight: 700, color: "rgba(255,255,255,0.5)", letterSpacing: "0.05em", textTransform: "uppercase" },
+          label: { fontSize: "0.7rem", fontWeight: 700, color: "rgba(255,255,255,0.5)", letterSpacing: "0.05em", textTransform: "uppercase" },
           dot: (active, bg) => ({
-            width: "26px", height: "26px", borderRadius: "50%", border: active ? "3px solid #fff" : "2px solid rgba(255,255,255,0.2)",
+            width: "22px", height: "22px", borderRadius: "50%", border: active ? "3px solid #fff" : "2px solid rgba(255,255,255,0.2)",
             background: bg, cursor: "pointer", boxShadow: active ? `0 0 8px ${bg}` : "none",
             transition: "all 0.2s"
           }),
           toolBtn: (active) => ({
-            display: "inline-flex", alignItems: "center", gap: "5px",
-            padding: "7px 13px", border: "none", borderRadius: "8px", cursor: "pointer",
-            fontWeight: 600, fontSize: "0.83rem",
+            display: "inline-flex", alignItems: "center", gap: "4px",
+            padding: "5px 10px", border: "none", borderRadius: "6px", cursor: "pointer",
+            fontWeight: 600, fontSize: "0.78rem",
             background: active ? "rgba(124,111,255,0.35)" : "rgba(255,255,255,0.07)",
             color: active ? "#c9c4ff" : "#bbb",
             transition: "all 0.2s"
           }),
           undoBtn: {
-            display: "inline-flex", alignItems: "center", gap: "5px",
-            padding: "7px 13px", border: "1px solid rgba(255,255,255,0.15)", borderRadius: "8px", cursor: "pointer",
-            fontWeight: 600, fontSize: "0.83rem", background: "rgba(255,255,255,0.06)", color: "#ccc"
+            display: "inline-flex", alignItems: "center", gap: "4px",
+            padding: "5px 10px", border: "1px solid rgba(255,255,255,0.15)", borderRadius: "6px", cursor: "pointer",
+            fontWeight: 600, fontSize: "0.78rem", background: "rgba(255,255,255,0.06)", color: "#ccc"
           }
         };
 
@@ -914,15 +914,15 @@ function Quiz() {
 
         {/* Sidebar Question Palette */}
         <div style={{
-          width: "260px", position: "sticky", top: "20px", background: "#fff",
-          borderRadius: "14px", border: "1px solid #eee", padding: "18px",
+          width: "200px", position: "sticky", top: "20px", background: "#fff",
+          borderRadius: "14px", border: "1px solid #eee", padding: "15px",
           boxShadow: "0 4px 15px rgba(0,0,0,0.03)", display: (isSubmitted && !isRetakeMode) ? "none" : "block"
         }}>
-          <h3 style={{ fontSize: "1rem", marginBottom: "15px", color: "#333", borderBottom: "1px solid #eee", paddingBottom: "10px", display: "flex", justifyContent: "space-between" }}>
+          <h3 style={{ fontSize: "0.95rem", marginBottom: "12px", color: "#333", borderBottom: "1px solid #eee", paddingBottom: "8px", display: "flex", justifyContent: "space-between" }}>
             Palette <span>{questions.length} Qs</span>
           </h3>
           
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: "8px" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "6px" }}>
             {questions.map((_, index) => {
               const isAnswered = isRetakeMode ? retakeAnswers[index] !== undefined : selectedAnswers[index] !== undefined;
               const isCurrent = current === index;
@@ -932,8 +932,8 @@ function Quiz() {
                   key={index}
                   onClick={() => handleQuestionChange(index)}
                   style={{
-                    width: "100%", aspectRatio: "1", border: "1px solid #ddd", borderRadius: "8px", cursor: "pointer",
-                    fontWeight: "700", fontSize: "0.82rem",
+                    width: "100%", aspectRatio: "1", border: "1px solid #ddd", borderRadius: "6px", cursor: "pointer",
+                    fontWeight: "800", fontSize: "0.72rem",
                     background: isCurrent ? "#7c6fff" : isAnswered ? "#2ed573" : "#f8f9fa",
                     color: (isCurrent || isAnswered) ? "white" : "#555",
                     transition: "all 0.2s ease",
