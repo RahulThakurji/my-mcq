@@ -43,6 +43,7 @@ function Quiz() {
 
   const canvasRefs = useRef({});
   const undoHistoryRefs = useRef({});
+  const redoHistoryRefs = useRef({});
   const questionContainersRef = useRef({});
   const explanationRefs = useRef({});
   const activeCanvasIndex = useRef(null);
@@ -292,6 +293,9 @@ function Quiz() {
     undoHistoryRefs.current[index].push(state);
     if (undoHistoryRefs.current[index].length > 20) undoHistoryRefs.current[index].shift();
 
+    // Clear redo stack when a new stroke begins
+    redoHistoryRefs.current[index] = [];
+
     strokePoints.current = [{ x: offsetX, y: offsetY }];
 
     ctx.beginPath();
@@ -342,10 +346,28 @@ function Quiz() {
       ctx.globalAlpha = 1.0;
       ctx.strokeStyle = penColor;
       ctx.lineWidth = penWidth;
-      ctx.lineTo(offsetX, offsetY);
-      ctx.stroke();
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
 
       strokePoints.current.push({ x: offsetX, y: offsetY });
+      const pts = strokePoints.current;
+
+      if (pts.length >= 3) {
+        // Redraw from last confirmed segment using quadratic bezier for smooth curves
+        const prev = pts[pts.length - 3];
+        const mid1 = { x: (prev.x + pts[pts.length - 2].x) / 2, y: (prev.y + pts[pts.length - 2].y) / 2 };
+        const mid2 = { x: (pts[pts.length - 2].x + offsetX) / 2, y: (pts[pts.length - 2].y + offsetY) / 2 };
+        ctx.beginPath();
+        ctx.moveTo(mid1.x, mid1.y);
+        ctx.quadraticCurveTo(pts[pts.length - 2].x, pts[pts.length - 2].y, mid2.x, mid2.y);
+        ctx.stroke();
+      } else {
+        ctx.beginPath();
+        ctx.moveTo(pts[0].x, pts[0].y);
+        ctx.lineTo(offsetX, offsetY);
+        ctx.stroke();
+      }
+
       clearTimeout(holdTimeout.current);
       holdTimeout.current = setTimeout(() => {
         if (isDrawing.current && !isSnapped.current) snapShape();
@@ -419,10 +441,37 @@ function Quiz() {
     const canvas = canvasRefs.current[index];
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
+
+    // Save current state to redo stack before undoing
+    if (!redoHistoryRefs.current[index]) redoHistoryRefs.current[index] = [];
+    redoHistoryRefs.current[index].push(ctx.getImageData(0, 0, canvas.width, canvas.height));
     
     const previousState = undoHistoryRefs.current[index].pop();
     ctx.putImageData(previousState, 0, 0);
     
+    const newDrawUrl = canvas.toDataURL();
+    setDrawings(prev => {
+      const newDrawings = { ...prev, [index]: newDrawUrl };
+      if (!isRetakeMode) syncToCloud({ drawings: newDrawings });
+      return newDrawings;
+    });
+    canvas.dataset.loaded = newDrawUrl;
+  };
+
+  const handleRedo = (index) => {
+    if (!redoHistoryRefs.current[index] || redoHistoryRefs.current[index].length === 0) return;
+
+    const canvas = canvasRefs.current[index];
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+
+    // Save current state back to undo stack
+    if (!undoHistoryRefs.current[index]) undoHistoryRefs.current[index] = [];
+    undoHistoryRefs.current[index].push(ctx.getImageData(0, 0, canvas.width, canvas.height));
+
+    const nextState = redoHistoryRefs.current[index].pop();
+    ctx.putImageData(nextState, 0, 0);
+
     const newDrawUrl = canvas.toDataURL();
     setDrawings(prev => {
       const newDrawings = { ...prev, [index]: newDrawUrl };
@@ -699,8 +748,9 @@ function Quiz() {
                   ))}
                 </div>
 
-                {/* Undo */}
+                {/* Undo / Redo */}
                 <button onClick={() => handleUndo(current)} style={tb.undoBtn} title="Undo Last Stroke">↩ Undo</button>
+                <button onClick={() => handleRedo(current)} style={tb.undoBtn} title="Redo">↪ Redo</button>
 
                 {/* Ink Colors (hidden for eraser) */}
                 {drawTool !== 'eraser' && (
