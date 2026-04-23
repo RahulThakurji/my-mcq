@@ -36,10 +36,12 @@ function Quiz() {
   const [drawTool, setDrawTool] = useState('pen');
   const [penColor, setPenColor] = useState('#ff0000');
   const [highlightColor, setHighlightColor] = useState('#ffff00');
+  const [penWidth, setPenWidth] = useState(2);
 
   const [drawings, setDrawings] = useState({});
 
   const canvasRefs = useRef({});
+  const undoHistoryRefs = useRef({});
   const questionContainersRef = useRef({});
   const explanationRefs = useRef({});
   const activeCanvasIndex = useRef(null);
@@ -236,8 +238,9 @@ function Quiz() {
     const ctx = canvas.getContext('2d');
     ctx.putImageData(preStrokeSnapshot.current, 0, 0);
     ctx.beginPath();
+    ctx.globalAlpha = 1.0;
     ctx.strokeStyle = penColor;
-    ctx.lineWidth = 2;
+    ctx.lineWidth = penWidth;
 
     const isClosedShape = gap < diag * 0.3;
 
@@ -279,8 +282,14 @@ function Quiz() {
     startX.current = offsetX;
     startY.current = offsetY;
 
-    preStrokeSnapshot.current = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    snapshot.current = preStrokeSnapshot.current;
+    const state = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    preStrokeSnapshot.current = state;
+    snapshot.current = state;
+    
+    if (!undoHistoryRefs.current[index]) undoHistoryRefs.current[index] = [];
+    undoHistoryRefs.current[index].push(state);
+    if (undoHistoryRefs.current[index].length > 20) undoHistoryRefs.current[index].shift();
+
     strokePoints.current = [{ x: offsetX, y: offsetY }];
 
     ctx.beginPath();
@@ -316,12 +325,21 @@ function Quiz() {
         }
       }
 
+    } else if (drawTool === 'canvas-highlighter') {
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = 0.4;
+      ctx.strokeStyle = penColor;
+      ctx.lineWidth = Math.max(15, penWidth * 3);
+      ctx.lineTo(offsetX, offsetY);
+      ctx.stroke();
+
     } else if (drawTool === 'pen') {
       if (isSnapped.current) return;
 
       ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = 1.0;
       ctx.strokeStyle = penColor;
-      ctx.lineWidth = 2;
+      ctx.lineWidth = penWidth;
       ctx.lineTo(offsetX, offsetY);
       ctx.stroke();
 
@@ -334,8 +352,9 @@ function Quiz() {
     } else {
       ctx.putImageData(snapshot.current, 0, 0);
       ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = 1.0;
       ctx.strokeStyle = penColor;
-      ctx.lineWidth = 2;
+      ctx.lineWidth = penWidth;
       ctx.beginPath();
 
       if (drawTool === 'line') {
@@ -390,6 +409,25 @@ function Quiz() {
     }
 
     activeCanvasIndex.current = null;
+  };
+
+  const handleUndo = (index) => {
+    if (!undoHistoryRefs.current[index] || undoHistoryRefs.current[index].length === 0) return;
+    
+    const canvas = canvasRefs.current[index];
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    
+    const previousState = undoHistoryRefs.current[index].pop();
+    ctx.putImageData(previousState, 0, 0);
+    
+    const newDrawUrl = canvas.toDataURL();
+    setDrawings(prev => {
+      const newDrawings = { ...prev, [index]: newDrawUrl };
+      if (!isRetakeMode) syncToCloud({ drawings: newDrawings });
+      return newDrawings;
+    });
+    canvas.dataset.loaded = newDrawUrl;
   };
 
   // --- Clearing Logic ---
@@ -598,22 +636,33 @@ function Quiz() {
             <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
               <select value={drawTool} onChange={(e) => setDrawTool(e.target.value)} style={{ padding: "8px", borderRadius: "4px", border: "1px solid #ccc", outline: "none", fontWeight: "bold" }}>
                 <option value="pen">Pen 🖋️</option>
+                <option value="canvas-highlighter">Highlighter 🖍️</option>
                 <option value="line">Line 📏</option>
                 <option value="rectangle">Rect ▭</option>
                 <option value="circle">Circle ◯</option>
                 <option value="eraser">Eraser 🧽</option>
               </select>
 
+              <button onClick={() => handleUndo(current)} style={{ ...btnBase, background: "#fff", border: "1px solid #ccc", color: "#333" }} title="Undo Last Stroke">
+                Undo ↩️
+              </button>
+
               {drawTool !== 'eraser' && (
-                <div style={toolFrameStyle}>
-                  <span style={{ fontSize: "0.85rem", fontWeight: "bold", color: "#555" }}>Ink:</span>
-                  <button onClick={() => setPenColor('#ff0000')} style={{ ...colorBtn(penColor === '#ff0000'), background: "#ff0000" }} title="Red"></button>
+                <>
+                  <div style={toolFrameStyle}>
+                    <span style={{ fontSize: "0.85rem", fontWeight: "bold", color: "#555" }}>Ink:</span>
+                    <button onClick={() => setPenColor('#ff0000')} style={{ ...colorBtn(penColor === '#ff0000'), background: "#ff0000" }} title="Red"></button>
                   <button onClick={() => setPenColor('#2196f3')} style={{ ...colorBtn(penColor === '#2196f3'), background: "#2196f3" }} title="Blue"></button>
                   <button onClick={() => setPenColor('#4caf50')} style={{ ...colorBtn(penColor === '#4caf50'), background: "#4caf50" }} title="Green"></button>
                   <button onClick={() => setPenColor('#ff9800')} style={{ ...colorBtn(penColor === '#ff9800'), background: "#ff9800" }} title="Orange"></button>
                   <button onClick={() => setPenColor('#9c27b0')} style={{ ...colorBtn(penColor === '#9c27b0'), background: "#9c27b0" }} title="Purple"></button>
                   <button onClick={() => setPenColor('#000000')} style={{ ...colorBtn(penColor === '#000000'), background: "#000000" }} title="Black"></button>
-                </div>
+                  </div>
+                  <div style={{ ...toolFrameStyle, width: "120px" }}>
+                    <span style={{ fontSize: "0.85rem", fontWeight: "bold", color: "#555" }}>Size:</span>
+                    <input type="range" min="1" max="20" value={penWidth} onChange={(e) => setPenWidth(Number(e.target.value))} style={{ width: "100%", cursor: "pointer" }} />
+                  </div>
+                </>
               )}
             </div>
           )}
