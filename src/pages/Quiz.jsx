@@ -275,7 +275,16 @@ function Quiz() {
       window.hasAlertedForLoginScratchpad = true;
     }
     activeCanvasIndex.current = index;
-    const { offsetX, offsetY } = nativeEvent;
+    const { offsetX, offsetY, clientX, clientY } = nativeEvent;
+
+    // Premium click-through: check if clicking an option button underneath the canvas
+    const elements = document.elementsFromPoint(clientX, clientY);
+    const targetBtn = elements.find(el => el.getAttribute('data-mcq-btn') === 'true');
+    if (targetBtn) {
+      targetBtn.click();
+      return;
+    }
+
     const canvas = canvasRefs.current[index];
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
@@ -865,13 +874,15 @@ function Quiz() {
                     key={i}
                     onClick={() => handleClick(index, i)}
                     disabled={isDisabled}
+                    data-mcq-btn="true"
                     style={{
                       display: "block", margin: "10px 0", padding: "10px", width: "100%", maxWidth: "500px",
                       textAlign: "left", border: "1px solid #ccc", borderRadius: "4px",
                       background: bg,
                       color: color,
                       opacity: opacity,
-                      cursor: isDisabled ? "default" : "pointer"
+                      cursor: isDisabled ? "default" : "pointer",
+                      position: "relative"
                     }}
                   >
                     {opt}
