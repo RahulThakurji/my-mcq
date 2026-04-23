@@ -805,7 +805,7 @@ function Quiz() {
       <div style={{ display: "flex", gap: "25px", alignItems: "flex-start", marginTop: "20px" }}>
         
         {/* Quiz Area */}
-        <div style={{ flex: 1, background: "white", minHeight: "400px", borderRadius: "12px", boxShadow: "0 2px 10px rgba(0,0,0,0.05)", border: "1px solid #eee", padding: "20px", position: "relative" }}>
+        <div style={{ flex: 1, background: "white", minHeight: "400px", borderRadius: "12px", boxShadow: "0 2px 10px rgba(0,0,0,0.05)", border: "1px solid #eee", padding: "0", position: "relative", overflow: "hidden" }}>
           {questions.map((q, index) => {
             const showAll = isSubmitted && !isRetakeMode;
             if (!showAll && index !== current) return null;
@@ -825,7 +825,7 @@ function Quiz() {
                 onPointerUp={(e) => { if (isDrawing.current) { e.currentTarget.releasePointerCapture(e.pointerId); stopDrawing(index); } }}
                 onPointerOut={(e) => { if (isDrawing.current) stopDrawing(index); }}
                 onPointerCancel={(e) => { if (isDrawing.current) stopDrawing(index); }}
-                style={{ position: "relative", padding: "10px", paddingBottom: showAll ? "70px" : "10px", marginBottom: "0", borderBottom: showAll && index < questions.length - 1 ? "2px dashed #eee" : "none" }}
+                style={{ position: "relative", padding: "30px", paddingBottom: showAll ? "70px" : "30px", marginBottom: "0", borderBottom: showAll && index < questions.length - 1 ? "2px dashed #eee" : "none" }}
               >
               {!isRetakeMode && (
                 <canvas
