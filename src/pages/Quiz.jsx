@@ -275,15 +275,7 @@ function Quiz() {
       window.hasAlertedForLoginScratchpad = true;
     }
     activeCanvasIndex.current = index;
-    const { offsetX, offsetY, clientX, clientY } = nativeEvent;
-
-    // Premium click-through: check if clicking an option button underneath the canvas
-    const elements = document.elementsFromPoint(clientX, clientY);
-    const targetBtn = elements.find(el => el.getAttribute('data-mcq-btn') === 'true');
-    if (targetBtn) {
-      targetBtn.click();
-      return;
-    }
+    const { offsetX, offsetY } = nativeEvent;
 
     const canvas = canvasRefs.current[index];
     if (!canvas) return;
@@ -817,22 +809,26 @@ function Quiz() {
               <div
                 key={index}
                 ref={el => questionContainersRef.current[index] = el}
+                onPointerDown={(e) => {
+                  if (isDrawingMode && e.target.tagName !== 'BUTTON' && e.target.tagName !== 'INPUT' && e.target.tagName !== 'SELECT') {
+                    e.currentTarget.setPointerCapture(e.pointerId);
+                    startDrawing(e, index);
+                  }
+                }}
+                onPointerMove={(e) => { if (isDrawing.current) draw(e, index); }}
+                onPointerUp={(e) => { if (isDrawing.current) { e.currentTarget.releasePointerCapture(e.pointerId); stopDrawing(index); } }}
+                onPointerOut={(e) => { if (isDrawing.current) stopDrawing(index); }}
+                onPointerCancel={(e) => { if (isDrawing.current) stopDrawing(index); }}
                 style={{ position: "relative", padding: "10px", marginBottom: showAll ? "60px" : "0", borderBottom: showAll && index < questions.length - 1 ? "2px dashed #eee" : "none" }}
               >
               {!isRetakeMode && (
                 <canvas
                   ref={el => canvasRefs.current[index] = el}
-                  onPointerDown={(e) => { e.target.setPointerCapture(e.pointerId); startDrawing(e, index); }}
-                  onPointerMove={(e) => draw(e, index)}
-                  onPointerUp={(e) => { e.target.releasePointerCapture(e.pointerId); stopDrawing(index); }}
-                  onPointerOut={() => stopDrawing(index)}
-                  onPointerCancel={() => stopDrawing(index)}
                   style={{
                     position: "absolute", top: 0, left: 0, zIndex: 20,
                     opacity: 1,
-                    pointerEvents: isDrawingMode ? "auto" : "none",
-                    touchAction: "none",
-                    cursor: isDrawingMode ? (drawTool === 'eraser' ? 'cell' : 'crosshair') : 'default'
+                    pointerEvents: "none",
+                    touchAction: "none"
                   }}
                 />
               )}
