@@ -875,14 +875,13 @@ function Quiz() {
                   <strong>Explanation <span style={{ color: "#666", fontSize: "0.9rem", fontWeight: "normal" }}>{isHighlightMode ? "(Drag to highlight)" : ""}</span>:</strong>
                   <div
                     ref={el => explanationRefs.current[index] = el}
-                    contentEditable={isHighlightMode}
-                    suppressContentEditableWarning
-                    onPointerDown={(e) => { if (e.pointerType === 'pen') e.preventDefault(); }}
                     onPointerUp={(e) => handleMouseUp(index)}
                     onTouchEnd={() => handleMouseUp(index)}
                     style={{
                       border: "1px solid #ccc", borderRadius: "4px", padding: "15px", marginTop: "5px", background: "#fff8e1",
-                      cursor: isHighlightMode ? "text" : "default", userSelect: isDrawingMode ? "none" : "auto"
+                      cursor: isHighlightMode ? "text" : "default",
+                      userSelect: (isDrawingMode || !isHighlightMode) ? "none" : "text",
+                      WebkitUserSelect: (isDrawingMode || !isHighlightMode) ? "none" : "text"
                     }}
                     dangerouslySetInnerHTML={{ __html: savedExplanations[index] ? savedExplanations[index] : `<span>${q.explanation}</span>` }}
                   />
