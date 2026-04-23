@@ -671,12 +671,7 @@ function Quiz() {
   return (
     <div style={{ padding: "20px", paddingBottom: "100px", fontFamily: "Arial", maxWidth: "1100px", margin: "0 auto", userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none" }}>
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h2>{subjName} - {chapterName}</h2>
-        <div style={{ display: "flex", gap: "10px" }}>
-          <button onClick={() => navigate(`/quizzes/${subjectName}`)} style={{ padding: "8px 16px", ...btnBase }}>Back to Chapters</button>
-        </div>
-      </div>
+    <div style={{ padding: "20px", paddingBottom: "100px", fontFamily: "Arial", maxWidth: "1100px", margin: "0 auto", userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none" }}>
 
       {/* ─── Modern Toolbar ─── */}
       {!isRetakeMode && (isSubmitted || showExp[current]) && (() => {
@@ -864,6 +859,12 @@ function Quiz() {
                   cursor: isDrawingMode ? (drawTool === 'eraser' ? 'cell' : 'crosshair') : 'default'
                 }}
               >
+              {index === 0 && (
+                <div style={{ marginBottom: "20px", display: "flex", justifyContent: "space-between", alignItems: "flex-start", borderBottom: "1px solid #ddd", paddingBottom: "15px" }}>
+                  <h1 style={{ margin: 0, fontSize: "1.5rem", color: "#333" }}>{subjName} - {chapterName}</h1>
+                  <button onClick={() => navigate(`/quizzes/${subjectName}`)} style={{ ...btnBase, padding: "6px 12px", fontSize: "0.85rem", background: "#f0f0f0" }}>Back to Chapters</button>
+                </div>
+              )}
               {!isRetakeMode && (
                 <canvas
                   ref={el => canvasRefs.current[index] = el}
