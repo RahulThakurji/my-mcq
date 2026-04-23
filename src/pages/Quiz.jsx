@@ -1,13 +1,11 @@
 import { useParams, useNavigate } from 'react-router-dom';
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import { loadQuiz } from '../utils/loadQuiz';
 import { useAuth } from '../context/AuthContext';
 import { doc, setDoc, getDoc, updateDoc, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
-import ReactQuill from 'react-quill';
-import 'react-quill/dist/quill.snow.css';
 
 function Quiz() {
   const { subjectName, chapterId } = useParams();
@@ -786,32 +784,72 @@ function Quiz() {
                   {/* Apple Notes-style Rich Text Notes Editor */}
                   <div style={{ marginTop: "16px" }}>
                     <strong style={{ fontSize: "0.95rem", color: "#444" }}>📝 My Notes:</strong>
-                    <div style={{ marginTop: "6px", borderRadius: "6px", overflow: "hidden", border: "1px solid #d0d0d0", background: "#fff" }}>
-                      <ReactQuill
-                        theme="snow"
-                        value={notes[index] || ""}
-                        onChange={(content) => {
-                          setNotes(prev => {
-                            const updated = { ...prev, [index]: content };
-                            syncToCloud({ notes: updated });
-                            return updated;
-                          });
-                        }}
-                        readOnly={isDrawingMode}
-                        modules={{
-                          toolbar: [
-                            [{ header: [1, 2, 3, false] }],
-                            ['bold', 'italic', 'underline', 'strike'],
-                            [{ color: [] }, { background: [] }],
-                            [{ list: 'ordered' }, { list: 'bullet' }, { list: 'check' }],
-                            ['blockquote', 'code-block'],
-                            ['link', 'image'],
-                            ['clean']
-                          ]
-                        }}
-                        style={{ minHeight: "160px", fontSize: "0.95rem" }}
-                      />
+
+                    {/* Formatting Toolbar */}
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: "4px", padding: "6px 8px", background: "#f5f5f5", border: "1px solid #d0d0d0", borderBottom: "none", borderRadius: "6px 6px 0 0", marginTop: "6px" }}>
+                      {[
+                        { cmd: 'bold',           label: 'B',  title: 'Bold',          style: { fontWeight: 'bold' } },
+                        { cmd: 'italic',         label: 'I',  title: 'Italic',        style: { fontStyle: 'italic' } },
+                        { cmd: 'underline',      label: 'U',  title: 'Underline',     style: { textDecoration: 'underline' } },
+                        { cmd: 'strikeThrough',  label: 'S̶',  title: 'Strikethrough', style: { textDecoration: 'line-through' } },
+                      ].map(({ cmd, label, title, style: s }) => (
+                        <button key={cmd} title={title} onMouseDown={(e) => { e.preventDefault(); document.execCommand(cmd); }} style={{ ...s, padding: '2px 8px', border: '1px solid #ccc', borderRadius: '3px', background: '#fff', cursor: 'pointer', fontSize: '0.85rem' }}>{label}</button>
+                      ))}
+                      <div style={{ width: '1px', background: '#ccc', margin: '0 4px' }} />
+                      {[
+                        { cmd: 'insertUnorderedList', label: '• List',  title: 'Bullet List' },
+                        { cmd: 'insertOrderedList',   label: '1. List', title: 'Numbered List' },
+                      ].map(({ cmd, label, title }) => (
+                        <button key={cmd} title={title} onMouseDown={(e) => { e.preventDefault(); document.execCommand(cmd); }} style={{ padding: '2px 8px', border: '1px solid #ccc', borderRadius: '3px', background: '#fff', cursor: 'pointer', fontSize: '0.82rem' }}>{label}</button>
+                      ))}
+                      <div style={{ width: '1px', background: '#ccc', margin: '0 4px' }} />
+                      <select title="Heading" defaultValue="" onMouseDown={(e) => e.stopPropagation()} onChange={(e) => { document.execCommand('formatBlock', false, e.target.value); e.target.value = ''; }} style={{ padding: '2px 4px', border: '1px solid #ccc', borderRadius: '3px', background: '#fff', fontSize: '0.82rem', cursor: 'pointer' }}>
+                        <option value="" disabled>Style</option>
+                        <option value="h1">Title</option>
+                        <option value="h2">Heading</option>
+                        <option value="h3">Subheading</option>
+                        <option value="p">Body</option>
+                      </select>
+                      <div style={{ width: '1px', background: '#ccc', margin: '0 4px' }} />
+                      <label title="Text Color" style={{ display: 'flex', alignItems: 'center', gap: '3px', fontSize: '0.82rem', cursor: 'pointer' }}>
+                        A
+                        <input type="color" defaultValue="#ff0000" onChange={(e) => document.execCommand('foreColor', false, e.target.value)} style={{ width: '20px', height: '20px', border: 'none', padding: 0, cursor: 'pointer' }} />
+                      </label>
+                      <label title="Highlight Color" style={{ display: 'flex', alignItems: 'center', gap: '3px', fontSize: '0.82rem', cursor: 'pointer' }}>
+                        🖍
+                        <input type="color" defaultValue="#ffff00" onChange={(e) => document.execCommand('hiliteColor', false, e.target.value)} style={{ width: '20px', height: '20px', border: 'none', padding: 0, cursor: 'pointer' }} />
+                      </label>
+                      <div style={{ width: '1px', background: '#ccc', margin: '0 4px' }} />
+                      <button title="Clear Formatting" onMouseDown={(e) => { e.preventDefault(); document.execCommand('removeFormat'); }} style={{ padding: '2px 8px', border: '1px solid #ccc', borderRadius: '3px', background: '#fff', cursor: 'pointer', fontSize: '0.82rem' }}>✕ Clear</button>
                     </div>
+
+                    {/* Editable Notes Area */}
+                    <div
+                      contentEditable={!isDrawingMode}
+                      suppressContentEditableWarning
+                      ref={el => {
+                        if (!el) return;
+                        // Only seed content on first mount so typing doesn't reset cursor
+                        if (!el.dataset.hydrated) {
+                          el.innerHTML = notes[index] || '';
+                          el.dataset.hydrated = 'true';
+                        }
+                      }}
+                      onInput={(e) => {
+                        const content = e.currentTarget.innerHTML;
+                        setNotes(prev => {
+                          const updated = { ...prev, [index]: content };
+                          syncToCloud({ notes: updated });
+                          return updated;
+                        });
+                      }}
+                      style={{
+                        minHeight: "160px", padding: "12px", border: "1px solid #d0d0d0",
+                        borderRadius: "0 0 6px 6px", background: "#fffef5", outline: "none",
+                        fontSize: "0.95rem", lineHeight: "1.6", cursor: isDrawingMode ? "default" : "text",
+                        userSelect: isDrawingMode ? "none" : "auto"
+                      }}
+                    />
                   </div>
 
                 </div>
