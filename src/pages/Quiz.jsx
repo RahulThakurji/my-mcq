@@ -948,8 +948,8 @@ function Quiz() {
                 );
               })}
 
-                {/* Show Check Answer button for both modes if selected but not revealed */}
-                {!isSubmitted && ((!isRetakeMode && selectedAnswers[index] !== undefined) || (isRetakeMode && retakeAnswers[index] !== undefined)) && !showExp[index] && (
+                {/* Show Check Answer button for Initial Mode if selected but not revealed */}
+                {!isRetakeMode && !isSubmitted && selectedAnswers[index] !== undefined && !showExp[index] && (
                   <button 
                     onClick={() => handleShowExplanation(index)}
                     style={{
@@ -962,7 +962,7 @@ function Quiz() {
                   </button>
                 )}
 
-                {(isSubmitted || showExp[index]) && q.explanation && (
+                {!isRetakeMode && (isSubmitted || showExp[index]) && q.explanation && (
                   <div style={{ marginTop: "20px", position: "relative", zIndex: 10, pointerEvents: isDrawingMode ? "none" : "auto" }}>
 
                     {/* Original Explanation with Highlighter support */}
@@ -1117,11 +1117,10 @@ function Quiz() {
             </button>
             <button 
               onClick={() => { 
-                const resetState = { current: 0, retakeAnswers: {}, retakeSubmitted: false, showExp: {} };
+                const resetState = { current: 0, retakeAnswers: {}, retakeSubmitted: false };
                 setIsRetakeMode(true); 
                 setRetakeAnswers({}); 
                 setRetakeSubmitted(false); 
-                setShowExp({});
                 setCurrent(0); 
                 syncToCloud(resetState);
               }} 
