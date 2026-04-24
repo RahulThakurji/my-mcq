@@ -869,7 +869,11 @@ function Quiz() {
                   userSelect: isDrawingMode ? "none" : "auto",
                   WebkitUserSelect: isDrawingMode ? "none" : "auto",
                   WebkitTouchCallout: "none",
-                  cursor: isDrawingMode ? (drawTool === 'eraser' ? 'cell' : 'crosshair') : 'default'
+                  cursor: isDrawingMode 
+                    ? ((isSubmitted || showExp[index]) 
+                        ? (drawTool === 'eraser' ? 'cell' : 'crosshair') 
+                        : 'not-allowed') 
+                    : 'default'
                 }}
               >
               <h3 style={{ pointerEvents: isDrawingMode ? "none" : "auto" }}>Question {index + 1} / {questions.length}</h3>
