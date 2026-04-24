@@ -211,17 +211,11 @@ function Quiz() {
       return;
     }
 
-    if (isSubmitted || isDrawingMode || selectedAnswers[qIdx] !== undefined) return;
+    if (isSubmitted || isDrawingMode || showExp[qIdx]) return;
 
     setSelectedAnswers(prevAnswers => {
       const newSelectedAnswers = { ...prevAnswers, [qIdx]: optIdx };
-
-      setShowExp(prevShowExp => {
-        const newShowExp = { ...prevShowExp, [qIdx]: true };
-        syncToCloud({ selectedAnswers: newSelectedAnswers, showExp: newShowExp });
-        return newShowExp;
-      });
-
+      syncToCloud({ selectedAnswers: newSelectedAnswers });
       return newSelectedAnswers;
     });
   };
@@ -911,38 +905,57 @@ function Quiz() {
                     }
                     if (retakeSubmitted && retakeAnswers[index] === undefined) opacity = 0.7;
                   } else {
-                    isDisabled = isSubmitted || isDrawingMode || selectedAnswers[index] !== undefined;
+                    isDisabled = (isSubmitted && !isRetakeMode) || isDrawingMode || showExp[index];
                     if (selectedAnswers[index] !== undefined) {
-                      bg = i === q.correct ? "#4caf50" : i === selectedAnswers[index] ? "#f44336" : "#f9f9f9";
-                      color = (i === q.correct || i === selectedAnswers[index]) ? "white" : "black";
+                      if (isSubmitted || showExp[index]) {
+                        bg = i === q.correct ? "#4caf50" : i === selectedAnswers[index] ? "#f44336" : "#f9f9f9";
+                        color = (i === q.correct || i === selectedAnswers[index]) ? "white" : "black";
+                      } else {
+                        bg = i === selectedAnswers[index] ? "#2196f3" : "#f9f9f9";
+                        color = i === selectedAnswers[index] ? "white" : "black";
+                      }
                     }
-                    if ((isSubmitted || isDrawingMode) && selectedAnswers[index] === undefined) opacity = 0.7;
+                    if (((isSubmitted && !isRetakeMode) || isDrawingMode || showExp[index]) && selectedAnswers[index] === undefined) opacity = 0.7;
                   }
 
                 return (
-                <button
-                  key={i}
-                  onClick={() => handleClick(index, i)}
-                  disabled={isDisabled}
-                  data-mcq-btn="true"
-                  data-q-index={index}
-                  data-opt-index={i}
-                  style={{
-                    display: "block", margin: "10px 0", padding: "10px", width: "100%", maxWidth: "500px",
-                    textAlign: "left", border: "1px solid #ccc", borderRadius: "4px",
-                    background: bg,
-                    color: color,
-                    opacity: opacity,
-                    cursor: isDisabled ? "default" : "pointer",
-                    position: "relative",
-                    zIndex: isDrawingMode ? 10 : 110,
-                    pointerEvents: isDrawingMode ? "none" : "auto"
-                  }}
-                >
-                  {opt}
-                </button>
+                  <button
+                    key={i}
+                    onClick={() => handleClick(index, i)}
+                    disabled={isDisabled}
+                    data-mcq-btn="true"
+                    data-q-index={index}
+                    data-opt-index={i}
+                    style={{
+                      display: "block", margin: "10px 0", padding: "10px", width: "100%", maxWidth: "500px",
+                      textAlign: "left", border: "1px solid #ccc", borderRadius: "4px",
+                      background: bg,
+                      color: color,
+                      opacity: opacity,
+                      cursor: isDisabled ? "default" : "pointer",
+                      position: "relative",
+                      zIndex: isDrawingMode ? 10 : 110,
+                      pointerEvents: isDrawingMode ? "none" : "auto"
+                    }}
+                  >
+                    {opt}
+                  </button>
                 );
               })}
+
+                {/* Show Check Answer button for Initial Mode if selected but not revealed */}
+                {!isRetakeMode && !isSubmitted && selectedAnswers[index] !== undefined && !showExp[index] && (
+                  <button 
+                    onClick={() => handleShowExplanation(index)}
+                    style={{
+                      marginTop: "15px", padding: "10px 20px", background: "#4caf50", color: "white", 
+                      border: "none", borderRadius: "6px", cursor: "pointer", fontWeight: "bold",
+                      display: "block", width: "fit-content", position: "relative", zIndex: 110
+                    }}
+                  >
+                    Check Answer & Explanation 👁️
+                  </button>
+                )}
 
                 {!isRetakeMode && (isSubmitted || showExp[index]) && q.explanation && (
                   <div style={{ marginTop: "20px", position: "relative", zIndex: 10, pointerEvents: isDrawingMode ? "none" : "auto" }}>
