@@ -1117,8 +1117,9 @@ function Quiz() {
             </button>
             <button 
               onClick={() => { 
-                const resetState = { current: 0, retakeAnswers: {}, retakeSubmitted: false };
+                const resetState = { current: 0, retakeAnswers: {}, retakeSubmitted: false, isSubmitted: false };
                 setIsRetakeMode(true); 
+                setIsSubmitted(false);
                 setRetakeAnswers({}); 
                 setRetakeSubmitted(false); 
                 setCurrent(0); 
@@ -1130,8 +1131,9 @@ function Quiz() {
             </button>
             <button 
               onClick={() => { 
-                const resetState = { current: 0, retakeAnswers: {}, retakeSubmitted: false, showExp: {} };
+                const resetState = { current: 0, retakeAnswers: {}, retakeSubmitted: false, showExp: {}, isSubmitted: false };
                 setIsRetakeMode(true); 
+                setIsSubmitted(false);
                 setRetakeAnswers({}); 
                 setRetakeSubmitted(false); 
                 setShowExp({});
