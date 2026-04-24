@@ -927,7 +927,7 @@ function Quiz() {
               })}
 
               {!isRetakeMode && (isSubmitted || showExp[index]) && q.explanation && (
-                <div style={{ marginTop: "20px", position: "relative", zIndex: 10 }}>
+                <div style={{ marginTop: "20px", position: "relative", zIndex: 10, pointerEvents: isDrawingMode ? "none" : "auto" }}>
 
                   {/* Original Explanation with Highlighter support */}
                   <strong>Explanation <span style={{ color: "#666", fontSize: "0.9rem", fontWeight: "normal" }}>{isHighlightMode ? "(Drag to highlight)" : ""}</span>:</strong>
