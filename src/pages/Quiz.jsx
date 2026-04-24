@@ -1068,13 +1068,13 @@ function Quiz() {
           <h3 style={{ color: "#2e7d32", marginBottom: "15px" }}>Review Mode</h3>
           <p style={{ color: "#555", marginBottom: "15px" }}>You can continue adding notes and highlights to any page before downloading.</p>
           <div style={{ display: "flex", justifyContent: "center", gap: "15px", flexWrap: "wrap" }}>
-            <button onClick={downloadPDF} style={{ ...btnBase, background: "#2196f3", color: "white", fontSize: "1.1rem", padding: "12px 24px" }}>
+            <button onClick={downloadPDF} style={{ ...btnBase, background: "#2196f3", color: "white", fontSize: "1.1rem", padding: "12px 24px", position: "relative", zIndex: 200, pointerEvents: "auto" }}>
               Download Study Notes (PDF) 📥
             </button>
-            <button onClick={() => { setIsRetakeMode(true); setRetakeAnswers({}); setRetakeSubmitted(false); setCurrent(0); }} style={{ ...btnBase, background: "#ff9800", color: "white", fontSize: "1.1rem", padding: "12px 24px" }}>
+            <button onClick={() => { setIsRetakeMode(true); setRetakeAnswers({}); setRetakeSubmitted(false); setCurrent(0); }} style={{ ...btnBase, background: "#ff9800", color: "white", fontSize: "1.1rem", padding: "12px 24px", position: "relative", zIndex: 200, pointerEvents: "auto" }}>
               Re-take Quiz 🔄
             </button>
-            <button onClick={clearAnnotations} style={{ ...btnBase, background: "#f44336", color: "white", fontSize: "1.1rem", padding: "12px 24px" }}>
+            <button onClick={clearAnnotations} style={{ ...btnBase, background: "#f44336", color: "white", fontSize: "1.1rem", padding: "12px 24px", position: "relative", zIndex: 200, pointerEvents: "auto" }}>
               Clear All (Fresh Start) 🗑️
             </button>
 
