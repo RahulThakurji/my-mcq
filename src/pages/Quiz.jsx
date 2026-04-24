@@ -277,11 +277,13 @@ function Quiz() {
     }
 
     // Lock drawing behind explanation reveal
-    if (!isSubmitted && !showExp[index]) return;
-
     activeCanvasIndex.current = index;
     const { clientX, clientY } = nativeEvent;
     lastPos.current = { x: clientX, y: clientY };
+    isDrawing.current = true; // Always mark as 'interacting' for tap detection
+
+    // Lock actual drawing logic behind explanation reveal
+    if (!isSubmitted && !showExp[index]) return;
 
     const canvas = canvasRefs.current[index];
     if (!canvas) return;
@@ -844,7 +846,7 @@ function Quiz() {
                 ref={el => questionContainersRef.current[index] = el}
                 onPointerDown={(e) => {
                   if (isDrawingMode && e.target.tagName !== 'INPUT' && e.target.tagName !== 'SELECT') {
-                    if (!isSubmitted && !showExp[index]) return; // Lock drawing
+                    // Always capture to handle tap-to-select even if drawing is locked
                     e.currentTarget.setPointerCapture(e.pointerId);
                     startDrawing(e, index);
                   }
