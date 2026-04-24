@@ -870,20 +870,8 @@ function Quiz() {
                   cursor: isDrawingMode ? (drawTool === 'eraser' ? 'cell' : 'crosshair') : 'default'
                 }}
               >
-              {!isRetakeMode && (
-                <canvas
-                  ref={el => canvasRefs.current[index] = el}
-                  style={{
-                    position: "absolute", top: 0, left: 0, zIndex: 20,
-                    opacity: 1,
-                    pointerEvents: "none",
-                    touchAction: "none"
-                  }}
-                />
-              )}
-
-              <h3>Question {index + 1} / {questions.length}</h3>
-              <p style={{ fontSize: '1.2rem', fontWeight: 'bold', userSelect: isDrawingMode ? "none" : "auto" }}>
+              <h3 style={{ pointerEvents: isDrawingMode ? "none" : "auto" }}>Question {index + 1} / {questions.length}</h3>
+              <p style={{ fontSize: '1.2rem', fontWeight: 'bold', userSelect: isDrawingMode ? "none" : "auto", pointerEvents: isDrawingMode ? "none" : "auto" }}>
                 {q.question}
               </p>
 
@@ -966,6 +954,17 @@ function Quiz() {
 
 
                 </div>
+              )}
+              {!isRetakeMode && (
+                <canvas
+                  ref={el => canvasRefs.current[index] = el}
+                  style={{
+                    position: "absolute", top: 0, left: 0, zIndex: 100,
+                    opacity: 1,
+                    pointerEvents: "none",
+                    touchAction: "none"
+                  }}
+                />
               )}
             </div>
           );
