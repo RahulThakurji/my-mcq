@@ -422,7 +422,11 @@ function Quiz() {
         const elements = document.elementsFromPoint(clientX, clientY);
         const targetBtn = elements.find(el => el.getAttribute('data-mcq-btn') === 'true');
         if (targetBtn) {
-          targetBtn.click();
+          const qIdx = parseInt(targetBtn.getAttribute('data-q-index'));
+          const optIdx = parseInt(targetBtn.getAttribute('data-opt-index'));
+          if (!isNaN(qIdx) && !isNaN(optIdx)) {
+            handleClick(qIdx, optIdx);
+          }
         }
       }
     }
@@ -914,6 +918,8 @@ function Quiz() {
                     onClick={() => handleClick(index, i)}
                     disabled={isDisabled}
                     data-mcq-btn="true"
+                    data-q-index={index}
+                    data-opt-index={i}
                     style={{
                       display: "block", margin: "10px 0", padding: "10px", width: "100%", maxWidth: "500px",
                       textAlign: "left", border: "1px solid #ccc", borderRadius: "4px",
