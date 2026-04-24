@@ -4,13 +4,13 @@ import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import { loadQuiz } from '../utils/loadQuiz';
 import { useAuth } from '../context/AuthContext';
-import { doc, setDoc, getDoc, updateDoc, onSnapshot } from 'firebase/firestore';
+import { doc, setDoc, updateDoc, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
 
 function Quiz() {
   const { subjectName, chapterId } = useParams();
   const navigate = useNavigate();
-  const { user, login } = useAuth();
+  const { user } = useAuth();
 
   // --- Dynamic Data State ---
   const [quizData, setQuizData] = useState(null);
@@ -35,7 +35,7 @@ function Quiz() {
   const [isDrawingMode, setIsDrawingMode] = useState(false);
   const [isHighlightMode, setIsHighlightMode] = useState(false);
   const [drawTool, setDrawTool] = useState('pen');
-  const [penColor, setPenColor] = useState('#FF003C'); // Default to bright red
+  const [penColor, setPenColor] = useState('#FF003C');
   const [highlightColor, setHighlightColor] = useState('#FFF800');
   const [penWidth, setPenWidth] = useState(2);
 
@@ -62,7 +62,6 @@ function Quiz() {
   const isSnapped = useRef(false);
   const isHighlightErased = useRef(false);
 
-  // Load the specific quiz data
   useEffect(() => {
     loadQuiz(subjectName, chapterId).then(data => {
       setQuizData(data);
@@ -70,7 +69,6 @@ function Quiz() {
     });
   }, [subjectName, chapterId]);
 
-  // Sync progress from Firestore in real-time
   useEffect(() => {
     if (!user || !subjectName || !chapterId) {
       setIsInitialLoadComplete(true);
@@ -87,10 +85,7 @@ function Quiz() {
         if (data.selectedAnswers !== undefined) setSelectedAnswers(data.selectedAnswers);
         if (data.showExp !== undefined) setShowExp(data.showExp);
         if (data.current !== undefined) setCurrent(data.current);
-
-        if (data.isSubmitted !== undefined) {
-          setIsSubmitted(data.isSubmitted);
-        }
+        if (data.isSubmitted !== undefined) setIsSubmitted(data.isSubmitted);
       } else if (!docSnap.exists()) {
         setCurrent(0);
         setDrawings({});
@@ -100,12 +95,7 @@ function Quiz() {
         setIsSubmitted(false);
 
         setDoc(docRef, {
-          current: 0,
-          drawings: {},
-          savedExplanations: {},
-          selectedAnswers: {},
-          showExp: {},
-          isSubmitted: false
+          current: 0, drawings: {}, savedExplanations: {}, selectedAnswers: {}, showExp: {}, isSubmitted: false
         }).catch(err => console.error("Error creating initial document:", err));
       }
       setIsInitialLoadComplete(true);
@@ -117,7 +107,6 @@ function Quiz() {
     return () => unsubscribe();
   }, [user, subjectName, chapterId]);
 
-  // Prevent closing/refreshing if currently saving to cloud
   useEffect(() => {
     const handleBeforeUnload = (e) => {
       if (isSaving) {
@@ -129,7 +118,6 @@ function Quiz() {
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, [isSaving]);
 
-  // Sync to Cloud helper
   const syncToCloud = async (updates) => {
     if (!user) {
       if (!window.hasAlertedForLoginGeneral) {
@@ -161,7 +149,6 @@ function Quiz() {
     }
   };
 
-  // Set up HD Canvas size and RESTORE saved drawings
   useEffect(() => {
     if (!quizData) return;
 
@@ -172,7 +159,6 @@ function Quiz() {
       const container = questionContainersRef.current[index];
 
       if (canvas && container) {
-        // NEW: Get screen DPI for crisp HD lines
         const ratio = window.devicePixelRatio || 1;
         const targetWidth = container.offsetWidth * ratio;
         const targetHeight = container.offsetHeight * ratio;
@@ -199,7 +185,6 @@ function Quiz() {
             const img = new Image();
             img.src = drawings[index];
             img.onload = () => {
-              // Draw image using CSS container size, the context scale will HD it perfectly
               ctx.drawImage(img, 0, 0, container.offsetWidth, container.offsetHeight);
             };
             canvas.dataset.loaded = drawings[index];
@@ -211,7 +196,6 @@ function Quiz() {
     });
   }, [current, isDrawingMode, quizData, isSubmitted, isInitialLoadComplete, drawings, showExp]);
 
-  // --- Core Navigation ---
   const handleQuestionChange = (newIndex) => {
     setCurrent(newIndex);
     if (!isRetakeMode) syncToCloud({ current: newIndex });
@@ -256,7 +240,6 @@ function Quiz() {
     });
   };
 
-  // --- Smart Shape Recognition Engine ---
   const snapShape = () => {
     const points = strokePoints.current;
     if (points.length < 15) return;
@@ -285,7 +268,7 @@ function Quiz() {
     ctx.globalAlpha = 1.0;
     ctx.strokeStyle = penColor;
     ctx.lineWidth = penWidth;
-    ctx.shadowBlur = 1; // Smooth shadow for shapes
+    ctx.shadowBlur = 1;
     ctx.shadowColor = penColor;
 
     const isClosedShape = gap < diag * 0.3;
@@ -309,12 +292,11 @@ function Quiz() {
     isSnapped.current = true;
   };
 
-  // --- Canvas Drawing Logic ---
   const startDrawing = (e, index) => {
     const { nativeEvent } = e;
     if (!isDrawingMode) return;
     if (!user && !window.hasAlertedForLoginScratchpad) {
-      alert("Please log in with Google to save your notes permanently. Your current drawings will only be saved temporarily.");
+      alert("Please log in with Google to save your notes permanently.");
       window.hasAlertedForLoginScratchpad = true;
     }
 
@@ -334,8 +316,6 @@ function Quiz() {
     const offsetY = clientY - rect.top;
 
     const ctx = canvas.getContext('2d');
-
-    isDrawing.current = true;
     isSnapped.current = false;
     startX.current = offsetX;
     startY.current = offsetY;
@@ -360,18 +340,39 @@ function Quiz() {
     if (!isDrawing.current || !isDrawingMode || activeCanvasIndex.current !== index) return;
     const canvas = canvasRefs.current[index];
     const ctx = canvas?.getContext('2d');
-    if (!ctx || !isDrawing.current) return;
+    if (!ctx) return;
 
     const rect = canvas.getBoundingClientRect();
     const offsetX = nativeEvent.clientX - rect.left;
     const offsetY = nativeEvent.clientY - rect.top;
 
+    strokePoints.current.push({ x: offsetX, y: offsetY });
+    const pts = strokePoints.current;
+
+    const drawSmoothCurve = () => {
+      if (pts.length >= 3) {
+        const prev = pts[pts.length - 3];
+        const mid1 = { x: (prev.x + pts[pts.length - 2].x) / 2, y: (prev.y + pts[pts.length - 2].y) / 2 };
+        const mid2 = { x: (pts[pts.length - 2].x + offsetX) / 2, y: (pts[pts.length - 2].y + offsetY) / 2 };
+        ctx.beginPath();
+        ctx.moveTo(mid1.x, mid1.y);
+        ctx.quadraticCurveTo(pts[pts.length - 2].x, pts[pts.length - 2].y, mid2.x, mid2.y);
+        ctx.stroke();
+      } else {
+        ctx.beginPath();
+        ctx.moveTo(pts[0].x, pts[0].y);
+        ctx.lineTo(offsetX, offsetY);
+        ctx.stroke();
+      }
+    };
+
     if (drawTool === 'eraser') {
       ctx.globalCompositeOperation = 'destination-out';
       ctx.lineWidth = 25;
-      ctx.shadowBlur = 0; // Turn off shadow for eraser
-      ctx.lineTo(offsetX, offsetY);
-      ctx.stroke();
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+      ctx.shadowBlur = 0;
+      drawSmoothCurve();
 
       const elementsUnderCursor = document.elementsFromPoint(nativeEvent.clientX, nativeEvent.clientY);
       const highlightedSpan = elementsUnderCursor.find(el => el.tagName === 'SPAN' && el.style.backgroundColor);
@@ -388,13 +389,14 @@ function Quiz() {
       }
 
     } else if (drawTool === 'canvas-highlighter') {
-      ctx.globalCompositeOperation = 'source-over';
-      ctx.globalAlpha = 0.4;
-      ctx.strokeStyle = penColor;
-      ctx.shadowBlur = 0; // Clear shadow
+      ctx.globalCompositeOperation = 'multiply';
+      ctx.globalAlpha = 0.6;
+      ctx.strokeStyle = highlightColor;
       ctx.lineWidth = Math.max(15, penWidth * 3);
-      ctx.lineTo(offsetX, offsetY);
-      ctx.stroke();
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+      ctx.shadowBlur = 0;
+      drawSmoothCurve();
 
     } else if (drawTool === 'pen') {
       if (isSnapped.current) return;
@@ -405,28 +407,10 @@ function Quiz() {
       ctx.lineWidth = penWidth;
       ctx.lineJoin = 'round';
       ctx.lineCap = 'round';
-
-      // NEW: Micro-shadow acts as anti-aliasing for buttery smooth lines
       ctx.shadowBlur = 0.5;
       ctx.shadowColor = penColor;
 
-      strokePoints.current.push({ x: offsetX, y: offsetY });
-      const pts = strokePoints.current;
-
-      if (pts.length >= 3) {
-        const prev = pts[pts.length - 3];
-        const mid1 = { x: (prev.x + pts[pts.length - 2].x) / 2, y: (prev.y + pts[pts.length - 2].y) / 2 };
-        const mid2 = { x: (pts[pts.length - 2].x + offsetX) / 2, y: (pts[pts.length - 2].y + offsetY) / 2 };
-        ctx.beginPath();
-        ctx.moveTo(mid1.x, mid1.y);
-        ctx.quadraticCurveTo(pts[pts.length - 2].x, pts[pts.length - 2].y, mid2.x, mid2.y);
-        ctx.stroke();
-      } else {
-        ctx.beginPath();
-        ctx.moveTo(pts[0].x, pts[0].y);
-        ctx.lineTo(offsetX, offsetY);
-        ctx.stroke();
-      }
+      drawSmoothCurve();
 
       clearTimeout(holdTimeout.current);
       holdTimeout.current = setTimeout(() => {
@@ -483,7 +467,6 @@ function Quiz() {
     const canvas = canvasRefs.current[index];
     const ctx = canvas?.getContext('2d');
     if (ctx) ctx.closePath();
-    isDrawing.current = false;
 
     if (canvas) {
       const newDrawUrl = canvas.toDataURL();
@@ -554,23 +537,18 @@ function Quiz() {
     canvas.dataset.loaded = newDrawUrl;
   };
 
-  // --- Clearing Logic ---
   const clearPage = (index) => {
     const canvas = canvasRefs.current[index];
     if (canvas) {
       canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
       canvas.dataset.loaded = "empty";
     }
-
     const expRef = explanationRefs.current[index];
-    if (expRef) {
-      expRef.innerHTML = questions[index].explanation;
-    }
+    if (expRef) expRef.innerHTML = questions[index].explanation;
 
     setDrawings(prev => {
       const newDrawings = { ...prev };
       delete newDrawings[index];
-
       setSavedExplanations(prevExp => {
         const newExplanations = { ...prevExp };
         delete newExplanations[index];
@@ -590,13 +568,7 @@ function Quiz() {
       setIsRetakeMode(false);
       setIsDrawingMode(false);
       setIsHighlightMode(false);
-
-      syncToCloud({
-        isSubmitted: false,
-        selectedAnswers: {},
-        showExp: {},
-        current: 0
-      });
+      syncToCloud({ isSubmitted: false, selectedAnswers: {}, showExp: {}, current: 0 });
     }
   };
 
@@ -616,32 +588,33 @@ function Quiz() {
           canvas.dataset.loaded = "empty";
         }
         const expRef = explanationRefs.current[index];
-        if (expRef) {
-          expRef.innerHTML = questions[index].explanation;
-        }
+        if (expRef) expRef.innerHTML = questions[index].explanation;
       });
       syncToCloud({ drawings: {}, savedExplanations: {}, selectedAnswers: {}, showExp: {}, isSubmitted: false, current: 0 });
     }
   };
 
-  // --- Text Highlight Logic ---
   const handleMouseUp = (index) => {
     if (!isSubmitted && !showExp[index]) return;
     if (isDrawingMode || !isHighlightMode) return;
 
     const selection = window.getSelection();
-    if (!selection || selection.rangeCount === 0) return;
+    if (!selection || selection.isCollapsed || selection.rangeCount === 0) return;
     const range = selection.getRangeAt(0);
-    if (range.toString().length === 0) return;
+    if (range.toString().trim().length === 0) return;
 
     if (!user && !window.hasAlertedForLoginHighlight) {
-      alert("Please log in with Google to save your highlights permanently. Your current highlights will only be saved temporarily.");
+      alert("Please log in with Google to save your highlights permanently.");
       window.hasAlertedForLoginHighlight = true;
     }
 
     try {
       const span = document.createElement("span");
       span.style.backgroundColor = highlightColor;
+      span.style.transition = "background-color 0.3s ease";
+      span.style.borderRadius = "2px";
+      span.style.padding = "2px 0";
+
       range.surroundContents(span);
       selection.removeAllRanges();
 
@@ -654,7 +627,7 @@ function Quiz() {
         return newExplanations;
       });
     } catch (err) {
-      console.log(err);
+      console.log("Cross-node highlighting block:", err);
     }
   };
 
@@ -667,9 +640,20 @@ function Quiz() {
     });
 
     const expRef = explanationRefs.current[index];
-    if (expRef) {
-      expRef.innerHTML = questions[index].explanation;
-    }
+    if (expRef) expRef.innerHTML = questions[index].explanation;
+  };
+
+  // --- DYNAMIC CURSOR GENERATOR ---
+  const getCustomCursor = () => {
+    if (!isDrawingMode) return 'default';
+    if (drawTool === 'eraser') return `url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2"><circle cx="12" cy="12" r="10" fill="white" opacity="0.8"/></svg>') 12 12, cell`;
+
+    const color = drawTool === 'canvas-highlighter' ? highlightColor : penColor;
+    const size = drawTool === 'canvas-highlighter' ? Math.max(15, penWidth * 3) : penWidth;
+    const opacity = drawTool === 'canvas-highlighter' ? 0.6 : 1;
+
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size + 4}" height="${size + 4}" viewBox="0 0 ${size + 4} ${size + 4}"><circle cx="${(size + 4) / 2}" cy="${(size + 4) / 2}" r="${size / 2}" fill="${encodeURIComponent(color)}" fill-opacity="${opacity}" stroke="rgba(0,0,0,0.1)" stroke-width="1"/></svg>`;
+    return `url('data:image/svg+xml;utf8,${svg}') ${(size + 4) / 2} ${(size + 4) / 2}, crosshair`;
   };
 
   if (loading || !isInitialLoadComplete) {
@@ -683,18 +667,8 @@ function Quiz() {
 
   if (!quizData) return <h2>Quiz not found for {subjectName} chapter {chapterId}</h2>;
   const { questions, subjectName: subjName, chapterName } = quizData;
-
   const hasEditsOnPage = drawings[current] || savedExplanations[current];
 
-  const calculateScore = () => {
-    let score = 0;
-    questions.forEach((q, index) => {
-      if (selectedAnswers[index] === q.correct) score++;
-    });
-    return score;
-  };
-
-  // --- PDF Logic ---
   const downloadPDF = async () => {
     const element = document.getElementById("pdf-container");
     const canvas = await html2canvas(element, { scale: 2 });
@@ -703,7 +677,6 @@ function Quiz() {
     const pdf = new jsPDF('p', 'mm', 'a4');
     const pdfWidth = pdf.internal.pageSize.getWidth();
     const pdfHeight = pdf.internal.pageSize.getHeight();
-
     const margin = 10;
     const imgWidth = pdfWidth - (margin * 2);
     const imgHeight = (canvas.height * imgWidth) / canvas.width;
@@ -724,7 +697,6 @@ function Quiz() {
     pdf.save(`${subjName}-${chapterName}-Notes.pdf`);
   };
 
-  // UI Styles
   const btnBase = { padding: "8px 16px", border: "none", borderRadius: "4px", cursor: "pointer", fontWeight: "bold" };
 
   return (
@@ -737,7 +709,6 @@ function Quiz() {
         </div>
       </div>
 
-      {/* Cloud Saving Indicator */}
       {isSaving && (
         <div style={{
           position: "fixed", top: "20px", right: "20px", zIndex: 10000,
@@ -763,72 +734,43 @@ function Quiz() {
           wrap: {
             display: "flex", flexWrap: "wrap", gap: "8px", padding: "8px 12px",
             background: "linear-gradient(135deg, #1e1e2e 0%, #2a2a3e 100%)",
-            borderRadius: "12px",
-            position: "fixed",
-            bottom: "15px",
-            left: "50%",
-            transform: "translateX(-50%)",
-            zIndex: 1000,
-            width: "max-content",
-            maxWidth: "98vw",
-            alignItems: "center",
-            boxShadow: "0 8px 32px rgba(0,0,0,0.3)",
+            borderRadius: "12px", position: "fixed", bottom: "15px", left: "50%",
+            transform: "translateX(-50%)", zIndex: 1000, width: "max-content",
+            maxWidth: "98vw", alignItems: "center", boxShadow: "0 8px 32px rgba(0,0,0,0.3)",
             border: (isDrawingMode || isHighlightMode) ? "1.5px solid #7c6fff" : "1.5px solid rgba(255,255,255,0.1)",
             transition: "all 0.3s ease"
           },
           pill: (active, from, to) => ({
-            display: "inline-flex", alignItems: "center", gap: "5px",
-            padding: "6px 14px", border: "none", borderRadius: "999px", cursor: "pointer",
+            display: "inline-flex", alignItems: "center", gap: "5px", padding: "6px 14px", border: "none", borderRadius: "999px", cursor: "pointer",
             fontWeight: 700, fontSize: "0.82rem", letterSpacing: "0.01em",
             background: active ? `linear-gradient(135deg, ${from}, ${to})` : "rgba(255,255,255,0.08)",
-            color: active ? "#fff" : "#ccc",
-            boxShadow: active ? `0 2px 12px ${from}55` : "none",
+            color: active ? "#fff" : "#ccc", boxShadow: active ? `0 2px 12px ${from}55` : "none",
             transition: "all 0.2s ease"
           }),
           sep: { width: "1px", height: "24px", background: "rgba(255,255,255,0.15)", margin: "0 2px" },
-          card: {
-            display: "flex", gap: "6px", alignItems: "center",
-            background: "rgba(255,255,255,0.06)", borderRadius: "8px",
-            padding: "4px 10px", border: "1px solid rgba(255,255,255,0.1)"
-          },
+          card: { display: "flex", gap: "6px", alignItems: "center", background: "rgba(255,255,255,0.06)", borderRadius: "8px", padding: "4px 10px", border: "1px solid rgba(255,255,255,0.1)" },
           label: { fontSize: "0.7rem", fontWeight: 700, color: "rgba(255,255,255,0.5)", letterSpacing: "0.05em", textTransform: "uppercase" },
           dot: (active, bg) => ({
             width: "22px", height: "22px", borderRadius: "50%", border: active ? "3px solid #fff" : "2px solid rgba(255,255,255,0.2)",
-            background: bg, cursor: "pointer", boxShadow: active ? `0 0 8px ${bg}` : "none",
-            transition: "all 0.2s"
+            background: bg, cursor: "pointer", boxShadow: active ? `0 0 8px ${bg}` : "none", transition: "all 0.2s"
           }),
           toolBtn: (active) => ({
-            display: "inline-flex", alignItems: "center", gap: "4px",
-            padding: "5px 10px", border: "none", borderRadius: "6px", cursor: "pointer",
-            fontWeight: 600, fontSize: "0.78rem",
-            background: active ? "rgba(124,111,255,0.35)" : "rgba(255,255,255,0.07)",
-            color: active ? "#c9c4ff" : "#bbb",
-            transition: "all 0.2s"
+            display: "inline-flex", alignItems: "center", gap: "4px", padding: "5px 10px", border: "none", borderRadius: "6px", cursor: "pointer",
+            fontWeight: 600, fontSize: "0.78rem", background: active ? "rgba(124,111,255,0.35)" : "rgba(255,255,255,0.07)",
+            color: active ? "#c9c4ff" : "#bbb", transition: "all 0.2s"
           }),
           undoBtn: {
-            display: "inline-flex", alignItems: "center", gap: "4px",
-            padding: "5px 10px", border: "1px solid rgba(255,255,255,0.15)", borderRadius: "6px", cursor: "pointer",
+            display: "inline-flex", alignItems: "center", gap: "4px", padding: "5px 10px", border: "1px solid rgba(255,255,255,0.15)", borderRadius: "6px", cursor: "pointer",
             fontWeight: 600, fontSize: "0.78rem", background: "rgba(255,255,255,0.06)", color: "#ccc"
           }
         };
 
-        // NEW: Bright, highly saturated "Neon" colors
         const penColors = [
-          { c: '#FF003C', n: 'Neon Red' },
-          { c: '#00D0FF', n: 'Cyan Blue' },
-          { c: '#00FF33', n: 'Neon Green' },
-          { c: '#FF8800', n: 'Vibrant Orange' },
-          { c: '#D500F9', n: 'Bright Purple' },
-          { c: '#FFEA00', n: 'Bright Yellow' },
-          { c: '#111111', n: 'Deep Black' },
-          { c: '#FFFFFF', n: 'Pure White' }
+          { c: '#FF003C', n: 'Neon Red' }, { c: '#00D0FF', n: 'Cyan Blue' }, { c: '#00FF33', n: 'Neon Green' },
+          { c: '#FF8800', n: 'Vibrant Orange' }, { c: '#D500F9', n: 'Bright Purple' }, { c: '#FFEA00', n: 'Bright Yellow' },
+          { c: '#111111', n: 'Deep Black' }, { c: '#FFFFFF', n: 'Pure White' }
         ];
-        const hlColors = [
-          { c: '#FFF800', n: 'Yellow' },
-          { c: '#00FF66', n: 'Green' },
-          { c: '#FF007F', n: 'Pink' },
-          { c: '#00E5FF', n: 'Blue' }
-        ];
+        const hlColors = [{ c: '#FFF800', n: 'Yellow' }, { c: '#00FF66', n: 'Green' }, { c: '#FF007F', n: 'Pink' }, { c: '#00E5FF', n: 'Blue' }];
         const tools = [
           { v: 'pen', icon: '✏️', label: 'Pen' }, { v: 'canvas-highlighter', icon: '🖊️', label: 'Marker' },
           { v: 'line', icon: '╱', label: 'Line' }, { v: 'rectangle', icon: '▭', label: 'Rect' },
@@ -837,13 +779,11 @@ function Quiz() {
 
         return (
           <div style={tb.wrap}>
-            <button onClick={() => { setIsDrawingMode(!isDrawingMode); setIsHighlightMode(false); }}
-              style={tb.pill(isDrawingMode, '#7c6fff', '#4a90d9')}>
+            <button onClick={() => { setIsDrawingMode(!isDrawingMode); setIsHighlightMode(false); }} style={tb.pill(isDrawingMode, '#7c6fff', '#4a90d9')}>
               ✏️ {isDrawingMode ? 'Close Pen' : 'Pen'}
             </button>
 
-            <button onClick={() => { setIsHighlightMode(!isHighlightMode); setIsDrawingMode(false); }}
-              style={tb.pill(isHighlightMode, '#ff9f43', '#ee5a24')}>
+            <button onClick={() => { setIsHighlightMode(!isHighlightMode); setIsDrawingMode(false); }} style={tb.pill(isHighlightMode, '#ff9f43', '#ee5a24')}>
               🖍️ {isHighlightMode ? 'Close' : 'Highlighter'}
             </button>
 
@@ -864,9 +804,7 @@ function Quiz() {
                 <div style={tb.sep} />
                 <div style={tb.card}>
                   {tools.map(({ v, icon, label }) => (
-                    <button key={v} title={label} onClick={() => setDrawTool(v)} style={tb.toolBtn(drawTool === v)}>
-                      {icon} {label}
-                    </button>
+                    <button key={v} title={label} onClick={() => setDrawTool(v)} style={tb.toolBtn(drawTool === v)}>{icon} {label}</button>
                   ))}
                 </div>
 
@@ -904,12 +842,11 @@ function Quiz() {
         );
       })()}
 
-
       {/* Main Content Area with Sidebar */}
-      <div style={{ display: "flex", gap: "25px", alignItems: "flex-start", marginTop: "20px" }}>
+      <div style={{ display: "flex", gap: "25px", alignItems: "flex-start", marginTop: "20px", justifyContent: "center" }}>
 
-        {/* Quiz Area */}
-        <div style={{ flex: 1, background: "white", minHeight: "400px", borderRadius: "12px", boxShadow: "0 2px 10px rgba(0,0,0,0.05)", border: "1px solid #eee", padding: "0", position: "relative", overflow: "visible" }}>
+        {/* Quiz Area - Added Fixed Max Width and Enforced Width */}
+        <div style={{ width: "750px", maxWidth: "100%", flexShrink: 0, background: "white", minHeight: "400px", borderRadius: "12px", boxShadow: "0 2px 10px rgba(0,0,0,0.05)", border: "1px solid #eee", padding: "0", position: "relative", overflow: "visible" }}>
           {questions.map((q, index) => {
             const showAll = isSubmitted && !isRetakeMode;
             if (!showAll && index !== current) return null;
@@ -940,17 +877,24 @@ function Quiz() {
                   userSelect: isDrawingMode ? "none" : "auto",
                   WebkitUserSelect: isDrawingMode ? "none" : "auto",
                   WebkitTouchCallout: "none",
+                  textAlign: "left", // Force Left Alignment for entire block
                   cursor: isDrawingMode
-                    ? ((isRetakeMode ? retakeSubmitted : (isSubmitted || showExp[index]))
-                      ? (drawTool === 'eraser' ? 'cell' : 'crosshair')
-                      : 'default')
+                    ? ((isRetakeMode ? retakeSubmitted : (isSubmitted || showExp[index])) ? getCustomCursor() : 'default')
                     : 'default'
                 }}
               >
-                <h3 style={{ pointerEvents: isDrawingMode ? "none" : "auto" }}>Question {index + 1} / {questions.length}</h3>
-                <p style={{ fontSize: '1.2rem', fontWeight: 'bold', userSelect: isDrawingMode ? "none" : "auto", pointerEvents: isDrawingMode ? "none" : "auto" }}>
-                  {q.question}
-                </p>
+                {/* Formatting left-aligned "1. Question text..." */}
+                <div style={{
+                  display: "flex", alignItems: "flex-start", gap: "8px", marginBottom: "20px",
+                  pointerEvents: isDrawingMode ? "none" : "auto", userSelect: isDrawingMode ? "none" : "auto"
+                }}>
+                  <span style={{ fontSize: '1.2rem', fontWeight: 'bold' }}>
+                    {index + 1}.
+                  </span>
+                  <span style={{ fontSize: '1.2rem', fontWeight: 'bold' }}>
+                    {q.question}
+                  </span>
+                </div>
 
                 {q.options.map((opt, i) => {
                   let isDisabled = false;
@@ -993,15 +937,10 @@ function Quiz() {
                       data-q-index={index}
                       data-opt-index={i}
                       style={{
-                        display: "block", margin: "10px 0", padding: "10px", width: "100%", maxWidth: "500px",
-                        textAlign: "left", border: "1px solid #ccc", borderRadius: "4px",
-                        background: bg,
-                        color: color,
-                        opacity: opacity,
-                        cursor: isDisabled ? "default" : "pointer",
-                        position: "relative",
-                        zIndex: isDrawingMode ? 1 : 110,
-                        pointerEvents: isDrawingMode ? "none" : "auto"
+                        display: "block", margin: "10px 0", padding: "12px 15px", width: "100%", // spread across width
+                        textAlign: "left", border: "1px solid #ccc", borderRadius: "6px", background: bg, color: color, opacity: opacity,
+                        cursor: isDisabled ? "default" : "pointer", position: "relative", zIndex: isDrawingMode ? 1 : 110,
+                        pointerEvents: isDrawingMode ? "none" : "auto", fontSize: "1rem"
                       }}
                     >
                       {opt}
@@ -1013,9 +952,9 @@ function Quiz() {
                   <button
                     onClick={() => handleShowExplanation(index)}
                     style={{
-                      marginTop: "15px", padding: "10px 20px", background: "#4caf50", color: "white",
-                      border: "none", borderRadius: "6px", cursor: "pointer", fontWeight: "bold",
-                      display: "block", width: "fit-content", position: "relative", zIndex: 110
+                      marginTop: "15px", padding: "10px 20px", background: "#4caf50", color: "white", border: "none",
+                      borderRadius: "6px", cursor: "pointer", fontWeight: "bold", display: "block", width: "fit-content",
+                      position: "relative", zIndex: 110
                     }}
                   >
                     Check Answer & Explanation 👁️
@@ -1023,20 +962,17 @@ function Quiz() {
                 )}
 
                 {!isRetakeMode && (isSubmitted || showExp[index]) && q.explanation && (
-                  <div style={{ marginTop: "20px", position: "relative", zIndex: 10, pointerEvents: isDrawingMode ? "none" : "auto" }}>
-
+                  <div style={{ marginTop: "20px", position: "relative", zIndex: 10, pointerEvents: isDrawingMode ? "none" : "auto", textAlign: "left" }}>
                     <strong>Explanation <span style={{ color: "#666", fontSize: "0.9rem", fontWeight: "normal" }}>{isHighlightMode ? "(Drag to highlight)" : ""}</span>:</strong>
                     <div
                       ref={el => explanationRefs.current[index] = el}
                       onPointerUp={(e) => handleMouseUp(index)}
                       onTouchEnd={() => handleMouseUp(index)}
                       style={{
-                        border: "1px solid #ccc", borderRadius: "4px", padding: "15px", marginTop: "5px", background: "#fff8e1",
-                        cursor: isHighlightMode ? "text" : "default",
-                        userSelect: isHighlightMode ? "text" : "none",
-                        WebkitUserSelect: isHighlightMode ? "text" : "none",
-                        WebkitTouchCallout: "none",
-                        pointerEvents: isDrawingMode ? "none" : "auto"
+                        border: "1px solid #ccc", borderRadius: "4px", padding: "15px", marginTop: "10px", background: "#fff8e1",
+                        cursor: isHighlightMode ? "text" : "default", userSelect: isHighlightMode ? "text" : "none",
+                        WebkitUserSelect: isHighlightMode ? "text" : "none", WebkitTouchCallout: "none", pointerEvents: isDrawingMode ? "none" : "auto",
+                        textAlign: "left"
                       }}
                       dangerouslySetInnerHTML={{ __html: savedExplanations[index] ? savedExplanations[index] : `<span>${q.explanation}</span>` }}
                     />
@@ -1045,7 +981,6 @@ function Quiz() {
                         Clear Highlight
                       </button>
                     )}
-
                   </div>
                 )}
                 {!isRetakeMode && (
@@ -1053,9 +988,7 @@ function Quiz() {
                     ref={el => canvasRefs.current[index] = el}
                     style={{
                       position: "absolute", top: 0, left: 0, zIndex: 9999,
-                      opacity: (isSubmitted || showExp[index]) ? 1 : 0,
-                      pointerEvents: "none",
-                      touchAction: "none"
+                      opacity: (isSubmitted || showExp[index]) ? 1 : 0, pointerEvents: "none", touchAction: "none"
                     }}
                   />
                 )}
@@ -1064,9 +997,9 @@ function Quiz() {
           })}
         </div>
 
-        {/* Sidebar Question Palette */}
+        {/* Sidebar Question Palette - Updated for 3 Columns */}
         <div style={{
-          width: "200px", position: "sticky", top: "20px", background: "#fff",
+          width: "180px", flexShrink: 0, position: "sticky", top: "20px", background: "#fff",
           borderRadius: "14px", border: "1px solid #eee", padding: "15px",
           boxShadow: "0 4px 15px rgba(0,0,0,0.03)", display: (isSubmitted && !isRetakeMode) ? "none" : "block"
         }}>
@@ -1074,7 +1007,7 @@ function Quiz() {
             Palette <span>{questions.length} Qs</span>
           </h3>
 
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "6px" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "6px" }}>
             {questions.map((_, index) => {
               const isAnswered = isRetakeMode ? retakeAnswers[index] !== undefined : selectedAnswers[index] !== undefined;
               const isCurrent = current === index;
@@ -1085,12 +1018,9 @@ function Quiz() {
                   onClick={() => handleQuestionChange(index)}
                   style={{
                     width: "100%", aspectRatio: "1", border: "1px solid #ddd", borderRadius: "6px", cursor: "pointer",
-                    fontWeight: "800", fontSize: "0.72rem",
-                    background: isCurrent ? "#7c6fff" : isAnswered ? "#2ed573" : "#f8f9fa",
-                    color: (isCurrent || isAnswered) ? "white" : "#555",
-                    transition: "all 0.2s ease",
-                    boxShadow: isCurrent ? "0 2px 10px rgba(124,111,255,0.4)" : "none",
-                    transform: isCurrent ? "scale(1.08)" : "none"
+                    fontWeight: "800", fontSize: "0.72rem", background: isCurrent ? "#7c6fff" : isAnswered ? "#2ed573" : "#f8f9fa",
+                    color: (isCurrent || isAnswered) ? "white" : "#555", transition: "all 0.2s ease",
+                    boxShadow: isCurrent ? "0 2px 10px rgba(124,111,255,0.4)" : "none", transform: isCurrent ? "scale(1.08)" : "none"
                   }}
                 >
                   {index + 1}
@@ -1113,9 +1043,8 @@ function Quiz() {
         </div>
       </div>
 
-
       {(!isSubmitted || isRetakeMode) && (
-        <div style={{ marginTop: "20px", display: "flex", gap: "10px", flexWrap: "wrap" }}>
+        <div style={{ margin: "20px auto 0", width: "100%", display: "flex", gap: "10px", flexWrap: "wrap", justifyContent: "center", maxWidth: "955px" /* 750 + 180 + 25 gap */ }}>
           <button onClick={prevQuestion} disabled={current === 0} style={btnBase}>Previous</button>
           <button onClick={nextQuestion} disabled={current === questions.length - 1} style={btnBase}>Next</button>
 
@@ -1137,9 +1066,8 @@ function Quiz() {
         </div>
       )}
 
-      {/* RETAKE SUBMIT ACTIONS */}
       {isRetakeMode && retakeSubmitted && (
-        <div style={{ marginTop: "30px", padding: "20px", background: "#e3f2fd", borderRadius: "8px", textAlign: "center" }}>
+        <div style={{ margin: "30px auto 0", width: "100%", padding: "20px", background: "#e3f2fd", borderRadius: "8px", textAlign: "center", maxWidth: "955px" }}>
           <h3 style={{ color: "#1976d2", marginBottom: "15px" }}>Retake Results</h3>
           {(() => {
             let correct = 0, wrong = 0, unattempted = 0;
@@ -1163,9 +1091,8 @@ function Quiz() {
         </div>
       )}
 
-      {/* AFTER SUBMIT ACTIONS */}
       {isSubmitted && !isRetakeMode && (
-        <div style={{ marginTop: "30px", padding: "20px", background: "#e8f5e9", borderRadius: "8px", textAlign: "center" }}>
+        <div style={{ margin: "30px auto 0", width: "100%", padding: "20px", background: "#e8f5e9", borderRadius: "8px", textAlign: "center", maxWidth: "955px" }}>
           <h3 style={{ color: "#2e7d32", marginBottom: "15px" }}>Review Mode</h3>
           <p style={{ color: "#555", marginBottom: "15px" }}>You can continue adding notes and highlights to any page before downloading.</p>
           <div style={{ display: "flex", justifyContent: "center", gap: "15px", flexWrap: "wrap" }}>
@@ -1213,8 +1140,8 @@ function Quiz() {
               />
             )}
 
-            <div style={{ position: "relative", zIndex: 1 }}>
-              <h3 style={{ marginBottom: "10px", maxWidth: "700px" }}>Q{index + 1}: {q.question}</h3>
+            <div style={{ position: "relative", zIndex: 1, textAlign: "left" }}>
+              <h3 style={{ marginBottom: "10px", maxWidth: "700px" }}>{index + 1}. {q.question}</h3>
               {q.options.map((opt, i) => (
                 <p key={i} style={{ margin: "5px 0", padding: "5px", background: i === q.correct ? "#c8e6c9" : "transparent", fontWeight: i === q.correct ? "bold" : "normal", maxWidth: "600px" }}>
                   {i === q.correct ? "✔ " : "○ "} {opt}

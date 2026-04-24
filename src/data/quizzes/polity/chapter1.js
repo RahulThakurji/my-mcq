@@ -86,7 +86,7 @@
       question: "Which article guarantees equality before law?",
       options: ["Article 14", "Article 19", "Article 21", "Article 32"],
       correct: 0,
-      explanation: "Article 14 guarantees equality before law and equal protection of laws."
+      explanation: "Article 14 guarantees equality before law and equal protection of laws.Article 14 guarantees equality before law and equal protection of laws.Article 14 guarantees equality before law and equal protection of laws.Article 14 guarantees equality before law and equal protection of laws.Article 14 guarantees equality before law and equal protection of laws.Article 14 guarantees equality before law and equal protection of laws.Article 14 guarantees equality before law and equal protection of laws."
     }
   ]
 };
