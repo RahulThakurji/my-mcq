@@ -422,12 +422,14 @@ function Quiz() {
       const dist = Math.sqrt(Math.pow(clientX - lastPos.current.x, 2) + Math.pow(clientY - lastPos.current.y, 2));
       if (dist < 5) {
         const elements = document.elementsFromPoint(clientX, clientY);
-        const targetBtn = elements.find(el => el.getAttribute('data-mcq-btn') === 'true');
+        const targetBtn = elements.find(el => el.tagName === 'BUTTON' || el.getAttribute('data-tap-btn') === 'true');
         if (targetBtn) {
           const qIdx = parseInt(targetBtn.getAttribute('data-q-index'));
           const optIdx = parseInt(targetBtn.getAttribute('data-opt-index'));
           if (!isNaN(qIdx) && !isNaN(optIdx)) {
             handleClick(qIdx, optIdx);
+          } else {
+            targetBtn.click();
           }
         }
       }
@@ -946,7 +948,7 @@ function Quiz() {
                     dangerouslySetInnerHTML={{ __html: savedExplanations[index] ? savedExplanations[index] : `<span>${q.explanation}</span>` }}
                   />
                   {savedExplanations[index] && (
-                    <button onClick={() => clearHighlight(index)} disabled={isDrawingMode} style={{ marginTop: "6px", padding: "4px 8px", fontSize: "0.82rem", cursor: "pointer" }}>
+                    <button onClick={() => clearHighlight(index)} data-tap-btn="true" style={{ marginTop: "6px", padding: "4px 8px", fontSize: "0.82rem", cursor: "pointer", pointerEvents: "auto" }}>
                       Clear Highlight
                     </button>
                   )}
