@@ -118,6 +118,19 @@ function Quiz() {
     return () => unsubscribe();
   }, [user, subjectName, chapterId]);
 
+  // Prevent closing/refreshing if currently saving to cloud
+  useEffect(() => {
+    const handleBeforeUnload = (e) => {
+      if (isSaving) {
+        e.preventDefault();
+        // Standard browser warning message for unsaved changes
+        e.returnValue = "Your data is currently saving to the cloud. Are you sure you want to leave?";
+      }
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [isSaving]);
+
   // Sync to Cloud helper
   const syncToCloud = async (updates) => {
     if (!user) {
@@ -127,7 +140,12 @@ function Quiz() {
       }
       return;
     }
+
     const docRef = doc(db, 'users', user.uid, 'quizzes', `${subjectName}-${chapterId}`);
+
+    // Turn on the saving indicator
+    setIsSaving(true);
+
     try {
       await updateDoc(docRef, updates);
     } catch (error) {
@@ -142,6 +160,9 @@ function Quiz() {
         console.error("Error syncing progress:", error);
         alert(`Firestore Error (Update): ${error.message}. Please check your Firebase rules!`);
       }
+    } finally {
+      // Turn off the indicator when finished (whether it succeeded or failed)
+      setIsSaving(false);
     }
   };
 
@@ -210,7 +231,6 @@ function Quiz() {
         } else {
           newAnswers = { ...prev, [qIdx]: optIdx };
         }
-        // REMOVED syncToCloud here to prevent jumping during retake
         return newAnswers;
       });
       return;
@@ -557,6 +577,26 @@ function Quiz() {
     });
   };
 
+  // --- NEW: Start Fresh Logic ---
+  const startFreshRetainNotes = () => {
+    if (window.confirm("Start fresh? Your drawings and highlights will be safely hidden until you check the answers.")) {
+      setIsSubmitted(false);
+      setSelectedAnswers({});
+      setShowExp({});
+      setCurrent(0);
+      setIsRetakeMode(false);
+      setIsDrawingMode(false);
+      setIsHighlightMode(false);
+
+      syncToCloud({
+        isSubmitted: false,
+        selectedAnswers: {},
+        showExp: {},
+        current: 0
+      });
+    }
+  };
+
   const clearAnnotations = () => {
     if (window.confirm("Are you sure you want to clear ALL drawings and highlights from every page?")) {
       setDrawings({});
@@ -599,7 +639,7 @@ function Quiz() {
     try {
       const span = document.createElement("span");
       span.style.backgroundColor = highlightColor;
-      range.surroundContents(span);  // Fixed typo: surroundContents
+      range.surroundContents(span);
       selection.removeAllRanges();
 
       const expRef = explanationRefs.current[index];
@@ -696,8 +736,28 @@ function Quiz() {
         </div>
       </div>
 
+      {/* Cloud Saving Indicator */}
+      {isSaving && (
+        <div style={{
+          position: "fixed", top: "20px", right: "20px", zIndex: 10000,
+          background: "#fff3cd", color: "#856404", padding: "12px 24px",
+          borderRadius: "8px", border: "1px solid #ffeeba",
+          boxShadow: "0 4px 15px rgba(0,0,0,0.2)",
+          display: "flex", alignItems: "center", gap: "12px",
+          fontWeight: "bold", fontSize: "0.95rem"
+        }}>
+          <span style={{
+            display: "inline-block", width: "18px", height: "18px",
+            border: "3px solid rgba(133,100,4,0.3)", borderRadius: "50%",
+            borderTopColor: "#856404", animation: "spin 1s ease-in-out infinite"
+          }} />
+          ☁️ Data is storing in cloud, wait...
+          <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+        </div>
+      )}
+
       {/* ─── Modern Toolbar ─── */}
-      {(isSubmitted || showExp[current]) && (() => {
+      {!isRetakeMode && (isSubmitted || showExp[current]) && (() => {
         const tb = {
           wrap: {
             display: "flex", flexWrap: "wrap", gap: "8px", padding: "8px 12px",
@@ -948,12 +1008,12 @@ function Quiz() {
                   );
                 })}
 
-                {/* Show Check Answer button for both modes if selected but not revealed */}
-                {!isSubmitted && ((!isRetakeMode && selectedAnswers[index] !== undefined) || (isRetakeMode && retakeAnswers[index] !== undefined)) && !showExp[index] && (
-                  <button 
+                {/* Show Check Answer button for Initial Mode if selected but not revealed */}
+                {!isRetakeMode && !isSubmitted && selectedAnswers[index] !== undefined && !showExp[index] && (
+                  <button
                     onClick={() => handleShowExplanation(index)}
                     style={{
-                      marginTop: "15px", padding: "10px 20px", background: "#4caf50", color: "white", 
+                      marginTop: "15px", padding: "10px 20px", background: "#4caf50", color: "white",
                       border: "none", borderRadius: "6px", cursor: "pointer", fontWeight: "bold",
                       display: "block", width: "fit-content", position: "relative", zIndex: 110
                     }}
@@ -962,7 +1022,7 @@ function Quiz() {
                   </button>
                 )}
 
-                {(isSubmitted || showExp[index]) && q.explanation && (
+                {!isRetakeMode && (isSubmitted || showExp[index]) && q.explanation && (
                   <div style={{ marginTop: "20px", position: "relative", zIndex: 10, pointerEvents: isDrawingMode ? "none" : "auto" }}>
 
                     {/* Original Explanation with Highlighter support */}
@@ -996,10 +1056,9 @@ function Quiz() {
                     ref={el => canvasRefs.current[index] = el}
                     style={{
                       position: "absolute", top: 0, left: 0, zIndex: 9999,
-                      opacity: 1,
+                      opacity: (isSubmitted || showExp[index]) ? 1 : 0,
                       pointerEvents: "none",
-                      touchAction: "none",
-                      display: (isSubmitted || showExp[index]) ? "block" : "none"
+                      touchAction: "none"
                     }}
                   />
                 )}
@@ -1116,33 +1175,23 @@ function Quiz() {
             <button onClick={downloadPDF} style={{ ...btnBase, background: "#2196f3", color: "white", fontSize: "1.1rem", padding: "12px 24px", position: "relative", zIndex: 200, pointerEvents: "auto" }}>
               Download Study Notes (PDF) 📥
             </button>
-            <button 
-              onClick={() => { 
+            <button
+              onClick={startFreshRetainNotes}
+              style={{ ...btnBase, background: "#8e44ad", color: "white", fontSize: "1.1rem", padding: "12px 24px", position: "relative", zIndex: 200, pointerEvents: "auto", marginLeft: "15px" }}>
+              Re-take quiz ✨
+            </button>
+            <button
+              onClick={() => {
                 const resetState = { current: 0, retakeAnswers: {}, retakeSubmitted: false };
-                setIsRetakeMode(true); 
-                setRetakeAnswers({}); 
-                setRetakeSubmitted(false); 
-                setCurrent(0); 
+                setIsRetakeMode(true);
+                setRetakeAnswers({});
+                setRetakeSubmitted(false);
+                setCurrent(0);
                 syncToCloud(resetState);
-              }} 
+              }}
               style={{ ...btnBase, background: "#ff9800", color: "white", fontSize: "1.1rem", padding: "12px 24px", position: "relative", zIndex: 200, pointerEvents: "auto" }}
             >
               Test Yourself 🔄
-            </button>
-            <button 
-              onClick={() => { 
-                const resetState = { current: 0, retakeAnswers: {}, retakeSubmitted: false, isSubmitted: false, showExp: {} };
-                setIsRetakeMode(true); 
-                setIsSubmitted(false);
-                setRetakeAnswers({}); 
-                setRetakeSubmitted(false); 
-                setShowExp({});
-                setCurrent(0); 
-                syncToCloud(resetState);
-              }} 
-              style={{ ...btnBase, background: "#4caf50", color: "white", fontSize: "1.1rem", padding: "12px 24px", position: "relative", zIndex: 200, pointerEvents: "auto" }}
-            >
-              Start Fresh 🔄
             </button>
             <button onClick={clearAnnotations} style={{ ...btnBase, background: "#f44336", color: "white", fontSize: "1.1rem", padding: "12px 24px", position: "relative", zIndex: 200, pointerEvents: "auto" }}>
               Clear All (Fresh Start) 🗑️
