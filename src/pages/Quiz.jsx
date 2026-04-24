@@ -922,7 +922,7 @@ function Quiz() {
                       opacity: opacity,
                       cursor: isDisabled ? "default" : "pointer",
                       position: "relative",
-                      touchAction: isDrawingMode ? "none" : "auto"
+                      pointerEvents: isDrawingMode ? "none" : "auto"
                     }}
                   >
                     {opt}
