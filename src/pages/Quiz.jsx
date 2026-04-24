@@ -194,20 +194,27 @@ function Quiz() {
     syncToCloud({ drawings: newDrawings, isSubmitted: true });
   };
 
-  const handleClick = (qIndex, optIndex) => {
+  const handleClick = (qIdx, optIdx) => {
     if (isRetakeMode) {
-      if (retakeSubmitted || retakeAnswers[qIndex] !== undefined) return;
-      setRetakeAnswers(prev => ({ ...prev, [qIndex]: optIndex }));
+      if (retakeSubmitted) return;
+      setRetakeAnswers(prev => {
+        if (prev[qIdx] === optIdx) {
+          const newAnswers = { ...prev };
+          delete newAnswers[qIdx];
+          return newAnswers;
+        }
+        return { ...prev, [qIdx]: optIdx };
+      });
       return;
     }
 
-    if (isSubmitted || isDrawingMode || selectedAnswers[qIndex] !== undefined) return;
+    if (isSubmitted || isDrawingMode || selectedAnswers[qIdx] !== undefined) return;
 
     setSelectedAnswers(prevAnswers => {
-      const newSelectedAnswers = { ...prevAnswers, [qIndex]: optIndex };
+      const newSelectedAnswers = { ...prevAnswers, [qIdx]: optIdx };
 
       setShowExp(prevShowExp => {
-        const newShowExp = { ...prevShowExp, [qIndex]: true };
+        const newShowExp = { ...prevShowExp, [qIdx]: true };
         syncToCloud({ selectedAnswers: newSelectedAnswers, showExp: newShowExp });
         return newShowExp;
       });
