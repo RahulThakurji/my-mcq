@@ -35,8 +35,8 @@ function Quiz() {
   const [isDrawingMode, setIsDrawingMode] = useState(false);
   const [isHighlightMode, setIsHighlightMode] = useState(false);
   const [drawTool, setDrawTool] = useState('pen');
-  const [penColor, setPenColor] = useState('#ff0000');
-  const [highlightColor, setHighlightColor] = useState('#ffff00');
+  const [penColor, setPenColor] = useState('#FF003C'); // Default to bright red
+  const [highlightColor, setHighlightColor] = useState('#FFF800');
   const [penWidth, setPenWidth] = useState(2);
 
   const [drawings, setDrawings] = useState({});
@@ -92,7 +92,6 @@ function Quiz() {
           setIsSubmitted(data.isSubmitted);
         }
       } else if (!docSnap.exists()) {
-        // No document exists: Hydrate state with defaults and create initial document
         setCurrent(0);
         setDrawings({});
         setSavedExplanations({});
@@ -123,7 +122,6 @@ function Quiz() {
     const handleBeforeUnload = (e) => {
       if (isSaving) {
         e.preventDefault();
-        // Standard browser warning message for unsaved changes
         e.returnValue = "Your data is currently saving to the cloud. Are you sure you want to leave?";
       }
     };
@@ -142,8 +140,6 @@ function Quiz() {
     }
 
     const docRef = doc(db, 'users', user.uid, 'quizzes', `${subjectName}-${chapterId}`);
-
-    // Turn on the saving indicator
     setIsSaving(true);
 
     try {
@@ -161,36 +157,51 @@ function Quiz() {
         alert(`Firestore Error (Update): ${error.message}. Please check your Firebase rules!`);
       }
     } finally {
-      // Turn off the indicator when finished (whether it succeeded or failed)
       setIsSaving(false);
     }
   };
 
-  // Set up Canvas size and RESTORE saved drawings
+  // Set up HD Canvas size and RESTORE saved drawings
   useEffect(() => {
     if (!quizData) return;
 
     quizData.questions.forEach((_, index) => {
-      // If we are not in Full Review mode, only process the 'current' canvas
       if (!isSubmitted && index !== current) return;
 
       const canvas = canvasRefs.current[index];
       const container = questionContainersRef.current[index];
 
       if (canvas && container) {
-        const needsResize = canvas.width !== container.offsetWidth || canvas.height !== container.offsetHeight;
+        // NEW: Get screen DPI for crisp HD lines
+        const ratio = window.devicePixelRatio || 1;
+        const targetWidth = container.offsetWidth * ratio;
+        const targetHeight = container.offsetHeight * ratio;
+
+        const needsResize = canvas.width !== targetWidth || canvas.height !== targetHeight;
+
         if (needsResize || (drawings[index] && canvas.dataset.loaded !== drawings[index])) {
           if (needsResize) {
-            canvas.width = container.offsetWidth;
-            canvas.height = container.offsetHeight;
+            canvas.width = targetWidth;
+            canvas.height = targetHeight;
+            canvas.style.width = `${container.offsetWidth}px`;
+            canvas.style.height = `${container.offsetHeight}px`;
           }
+
           const ctx = canvas.getContext('2d');
+
+          if (needsResize) {
+            ctx.scale(ratio, ratio);
+          }
+
           ctx.clearRect(0, 0, canvas.width, canvas.height);
 
           if (drawings[index]) {
             const img = new Image();
             img.src = drawings[index];
-            img.onload = () => ctx.drawImage(img, 0, 0);
+            img.onload = () => {
+              // Draw image using CSS container size, the context scale will HD it perfectly
+              ctx.drawImage(img, 0, 0, container.offsetWidth, container.offsetHeight);
+            };
             canvas.dataset.loaded = drawings[index];
           } else {
             canvas.dataset.loaded = "empty";
@@ -274,6 +285,8 @@ function Quiz() {
     ctx.globalAlpha = 1.0;
     ctx.strokeStyle = penColor;
     ctx.lineWidth = penWidth;
+    ctx.shadowBlur = 1; // Smooth shadow for shapes
+    ctx.shadowColor = penColor;
 
     const isClosedShape = gap < diag * 0.3;
 
@@ -305,13 +318,11 @@ function Quiz() {
       window.hasAlertedForLoginScratchpad = true;
     }
 
-    // Lock drawing behind explanation reveal
     activeCanvasIndex.current = index;
     const { clientX, clientY } = nativeEvent;
     lastPos.current = { x: clientX, y: clientY };
-    isDrawing.current = true; // Always mark as 'interacting' for tap detection
+    isDrawing.current = true;
 
-    // Lock actual drawing logic behind explanation reveal or submission
     const isDrawingAllowed = isRetakeMode ? retakeSubmitted : (isSubmitted || showExp[index]);
     if (!isDrawingAllowed) return;
 
@@ -337,9 +348,7 @@ function Quiz() {
     undoHistoryRefs.current[index].push(state);
     if (undoHistoryRefs.current[index].length > 20) undoHistoryRefs.current[index].shift();
 
-    // Clear redo stack when a new stroke begins
     redoHistoryRefs.current[index] = [];
-
     strokePoints.current = [{ x: offsetX, y: offsetY }];
 
     ctx.beginPath();
@@ -360,10 +369,10 @@ function Quiz() {
     if (drawTool === 'eraser') {
       ctx.globalCompositeOperation = 'destination-out';
       ctx.lineWidth = 25;
+      ctx.shadowBlur = 0; // Turn off shadow for eraser
       ctx.lineTo(offsetX, offsetY);
       ctx.stroke();
 
-      // Erase text highlights underneath the canvas
       const elementsUnderCursor = document.elementsFromPoint(nativeEvent.clientX, nativeEvent.clientY);
       const highlightedSpan = elementsUnderCursor.find(el => el.tagName === 'SPAN' && el.style.backgroundColor);
       if (highlightedSpan) {
@@ -382,6 +391,7 @@ function Quiz() {
       ctx.globalCompositeOperation = 'source-over';
       ctx.globalAlpha = 0.4;
       ctx.strokeStyle = penColor;
+      ctx.shadowBlur = 0; // Clear shadow
       ctx.lineWidth = Math.max(15, penWidth * 3);
       ctx.lineTo(offsetX, offsetY);
       ctx.stroke();
@@ -396,11 +406,14 @@ function Quiz() {
       ctx.lineJoin = 'round';
       ctx.lineCap = 'round';
 
+      // NEW: Micro-shadow acts as anti-aliasing for buttery smooth lines
+      ctx.shadowBlur = 0.5;
+      ctx.shadowColor = penColor;
+
       strokePoints.current.push({ x: offsetX, y: offsetY });
       const pts = strokePoints.current;
 
       if (pts.length >= 3) {
-        // Redraw from last confirmed segment using quadratic bezier for smooth curves
         const prev = pts[pts.length - 3];
         const mid1 = { x: (prev.x + pts[pts.length - 2].x) / 2, y: (prev.y + pts[pts.length - 2].y) / 2 };
         const mid2 = { x: (pts[pts.length - 2].x + offsetX) / 2, y: (pts[pts.length - 2].y + offsetY) / 2 };
@@ -426,6 +439,8 @@ function Quiz() {
       ctx.globalAlpha = 1.0;
       ctx.strokeStyle = penColor;
       ctx.lineWidth = penWidth;
+      ctx.shadowBlur = 1;
+      ctx.shadowColor = penColor;
       ctx.beginPath();
 
       if (drawTool === 'line') {
@@ -447,7 +462,6 @@ function Quiz() {
     if (activeCanvasIndex.current !== index) return;
     clearTimeout(holdTimeout.current);
 
-    // Tap detection for buttons
     if (isDrawing.current && clientX !== undefined && clientY !== undefined) {
       const dist = Math.sqrt(Math.pow(clientX - lastPos.current.x, 2) + Math.pow(clientY - lastPos.current.y, 2));
       if (dist < 5) {
@@ -486,30 +500,24 @@ function Quiz() {
       if (expRef) {
         setSavedExplanations(prev => {
           const newExplanations = { ...prev, [index]: expRef.innerHTML };
-
-          // Sync both drawing and the newly erased explanation state at the same time
           setDrawings(prevDrawings => {
             syncToCloud({ drawings: prevDrawings, savedExplanations: newExplanations });
             return prevDrawings;
           });
-
           return newExplanations;
         });
       }
       isHighlightErased.current = false;
     }
-
     activeCanvasIndex.current = null;
   };
 
   const handleUndo = (index) => {
     if (!undoHistoryRefs.current[index] || undoHistoryRefs.current[index].length === 0) return;
-
     const canvas = canvasRefs.current[index];
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
 
-    // Save current state to redo stack before undoing
     if (!redoHistoryRefs.current[index]) redoHistoryRefs.current[index] = [];
     redoHistoryRefs.current[index].push(ctx.getImageData(0, 0, canvas.width, canvas.height));
 
@@ -527,12 +535,10 @@ function Quiz() {
 
   const handleRedo = (index) => {
     if (!redoHistoryRefs.current[index] || redoHistoryRefs.current[index].length === 0) return;
-
     const canvas = canvasRefs.current[index];
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
 
-    // Save current state back to undo stack
     if (!undoHistoryRefs.current[index]) undoHistoryRefs.current[index] = [];
     undoHistoryRefs.current[index].push(ctx.getImageData(0, 0, canvas.width, canvas.height));
 
@@ -568,16 +574,13 @@ function Quiz() {
       setSavedExplanations(prevExp => {
         const newExplanations = { ...prevExp };
         delete newExplanations[index];
-
         syncToCloud({ drawings: newDrawings, savedExplanations: newExplanations });
         return newExplanations;
       });
-
       return newDrawings;
     });
   };
 
-  // --- NEW: Start Fresh Logic ---
   const startFreshRetainNotes = () => {
     if (window.confirm("Start fresh? Your drawings and highlights will be safely hidden until you check the answers.")) {
       setIsSubmitted(false);
@@ -623,7 +626,7 @@ function Quiz() {
 
   // --- Text Highlight Logic ---
   const handleMouseUp = (index) => {
-    if (!isSubmitted && !showExp[index]) return; // Lock highlighting behind explanation
+    if (!isSubmitted && !showExp[index]) return;
     if (isDrawingMode || !isHighlightMode) return;
 
     const selection = window.getSelection();
@@ -723,8 +726,6 @@ function Quiz() {
 
   // UI Styles
   const btnBase = { padding: "8px 16px", border: "none", borderRadius: "4px", cursor: "pointer", fontWeight: "bold" };
-  const colorBtn = (isActive) => ({ width: "24px", height: "24px", borderRadius: "50%", border: isActive ? "3px solid black" : "1px solid #ccc", cursor: "pointer" });
-  const toolFrameStyle = { display: "flex", gap: "8px", alignItems: "center", background: "#fff", padding: "6px 12px", border: "1px solid #ccc", borderRadius: "6px", boxShadow: "0 1px 3px rgba(0,0,0,0.1)" };
 
   return (
     <div style={{ padding: "20px", paddingBottom: "100px", fontFamily: "Arial", maxWidth: "1100px", margin: "0 auto", userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none" }}>
@@ -811,12 +812,22 @@ function Quiz() {
           }
         };
 
+        // NEW: Bright, highly saturated "Neon" colors
         const penColors = [
-          { c: '#ff4757', n: 'Red' }, { c: '#1e90ff', n: 'Blue' }, { c: '#2ed573', n: 'Green' },
-          { c: '#ffa502', n: 'Orange' }, { c: '#a55eea', n: 'Purple' }, { c: '#ffffff', n: 'White' }, { c: '#2f3542', n: 'Black' }
+          { c: '#FF003C', n: 'Neon Red' },
+          { c: '#00D0FF', n: 'Cyan Blue' },
+          { c: '#00FF33', n: 'Neon Green' },
+          { c: '#FF8800', n: 'Vibrant Orange' },
+          { c: '#D500F9', n: 'Bright Purple' },
+          { c: '#FFEA00', n: 'Bright Yellow' },
+          { c: '#111111', n: 'Deep Black' },
+          { c: '#FFFFFF', n: 'Pure White' }
         ];
         const hlColors = [
-          { c: '#ffec3d', n: 'Yellow' }, { c: '#69f0ae', n: 'Green' }, { c: '#ff80ab', n: 'Pink' }, { c: '#40c4ff', n: 'Blue' }
+          { c: '#FFF800', n: 'Yellow' },
+          { c: '#00FF66', n: 'Green' },
+          { c: '#FF007F', n: 'Pink' },
+          { c: '#00E5FF', n: 'Blue' }
         ];
         const tools = [
           { v: 'pen', icon: '✏️', label: 'Pen' }, { v: 'canvas-highlighter', icon: '🖊️', label: 'Marker' },
@@ -826,19 +837,16 @@ function Quiz() {
 
         return (
           <div style={tb.wrap}>
-            {/* Pen Toggle */}
             <button onClick={() => { setIsDrawingMode(!isDrawingMode); setIsHighlightMode(false); }}
               style={tb.pill(isDrawingMode, '#7c6fff', '#4a90d9')}>
               ✏️ {isDrawingMode ? 'Close Pen' : 'Pen'}
             </button>
 
-            {/* Highlighter Toggle */}
             <button onClick={() => { setIsHighlightMode(!isHighlightMode); setIsDrawingMode(false); }}
               style={tb.pill(isHighlightMode, '#ff9f43', '#ee5a24')}>
               🖍️ {isHighlightMode ? 'Close' : 'Highlighter'}
             </button>
 
-            {/* Highlighter Colors */}
             {isHighlightMode && (
               <>
                 <div style={tb.sep} />
@@ -851,11 +859,9 @@ function Quiz() {
               </>
             )}
 
-            {/* Pen Sub-toolbar */}
             {isDrawingMode && (
               <>
                 <div style={tb.sep} />
-                {/* Tool Switcher */}
                 <div style={tb.card}>
                   {tools.map(({ v, icon, label }) => (
                     <button key={v} title={label} onClick={() => setDrawTool(v)} style={tb.toolBtn(drawTool === v)}>
@@ -864,11 +870,9 @@ function Quiz() {
                   ))}
                 </div>
 
-                {/* Undo / Redo */}
                 <button onClick={() => handleUndo(current)} style={tb.undoBtn} title="Undo Last Stroke">↩ Undo</button>
                 <button onClick={() => handleRedo(current)} style={tb.undoBtn} title="Redo">↪ Redo</button>
 
-                {/* Ink Colors (hidden for eraser) */}
                 {drawTool !== 'eraser' && (
                   <>
                     <div style={tb.card}>
@@ -878,7 +882,6 @@ function Quiz() {
                       ))}
                     </div>
 
-                    {/* Size Slider */}
                     <div style={{ ...tb.card, gap: "10px", minWidth: "150px" }}>
                       <span style={tb.label}>Size</span>
                       <input type="range" min="1" max="20" value={penWidth}
@@ -891,7 +894,6 @@ function Quiz() {
               </>
             )}
 
-            {/* Erase Page Annotations */}
             {!isSubmitted && hasEditsOnPage && (
               <button onClick={() => clearPage(current)}
                 style={{ ...tb.pill(false, '#ff4757', '#c0392b'), marginLeft: "auto", color: "#ffbaba", background: "rgba(255,71,87,0.15)", border: "1px solid rgba(255,71,87,0.4)" }}>
@@ -918,7 +920,6 @@ function Quiz() {
                 ref={el => questionContainersRef.current[index] = el}
                 onPointerDown={(e) => {
                   if (isDrawingMode && e.target.tagName !== 'INPUT' && e.target.tagName !== 'SELECT') {
-                    // Always capture to handle tap-to-select even if drawing is locked
                     e.currentTarget.setPointerCapture(e.pointerId);
                     startDrawing(e, index);
                   }
@@ -1008,7 +1009,6 @@ function Quiz() {
                   );
                 })}
 
-                {/* Show Check Answer button for Initial Mode if selected but not revealed */}
                 {!isRetakeMode && !isSubmitted && selectedAnswers[index] !== undefined && !showExp[index] && (
                   <button
                     onClick={() => handleShowExplanation(index)}
@@ -1025,7 +1025,6 @@ function Quiz() {
                 {!isRetakeMode && (isSubmitted || showExp[index]) && q.explanation && (
                   <div style={{ marginTop: "20px", position: "relative", zIndex: 10, pointerEvents: isDrawingMode ? "none" : "auto" }}>
 
-                    {/* Original Explanation with Highlighter support */}
                     <strong>Explanation <span style={{ color: "#666", fontSize: "0.9rem", fontWeight: "normal" }}>{isHighlightMode ? "(Drag to highlight)" : ""}</span>:</strong>
                     <div
                       ref={el => explanationRefs.current[index] = el}
@@ -1046,8 +1045,6 @@ function Quiz() {
                         Clear Highlight
                       </button>
                     )}
-
-
 
                   </div>
                 )}
