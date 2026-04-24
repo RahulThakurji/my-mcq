@@ -833,7 +833,7 @@ function Quiz() {
       <div style={{ display: "flex", gap: "25px", alignItems: "flex-start", marginTop: "20px" }}>
         
         {/* Quiz Area */}
-        <div style={{ flex: 1, background: "white", minHeight: "400px", borderRadius: "12px", boxShadow: "0 2px 10px rgba(0,0,0,0.05)", border: "1px solid #eee", padding: "0", position: "relative", overflow: "hidden" }}>
+        <div style={{ flex: 1, background: "white", minHeight: "400px", borderRadius: "12px", boxShadow: "0 2px 10px rgba(0,0,0,0.05)", border: "1px solid #eee", padding: "0", position: "relative", overflow: "visible" }}>
           {questions.map((q, index) => {
             const showAll = isSubmitted && !isRetakeMode;
             if (!showAll && index !== current) return null;
