@@ -950,7 +950,8 @@ function Quiz() {
                       cursor: isHighlightMode ? "text" : "default",
                       userSelect: isHighlightMode ? "text" : "none",
                       WebkitUserSelect: isHighlightMode ? "text" : "none",
-                      WebkitTouchCallout: "none"
+                      WebkitTouchCallout: "none",
+                      pointerEvents: isDrawingMode ? "none" : "auto"
                     }}
                     dangerouslySetInnerHTML={{ __html: savedExplanations[index] ? savedExplanations[index] : `<span>${q.explanation}</span>` }}
                   />
