@@ -1194,7 +1194,7 @@ function Quiz() {
               Test Yourself 🔄
             </button>
             <button onClick={clearAnnotations} style={{ ...btnBase, background: "#f44336", color: "white", fontSize: "1.1rem", padding: "12px 24px", position: "relative", zIndex: 200, pointerEvents: "auto" }}>
-              Clear All (Fresh Start) 🗑️
+              Clear Notes 🗑️
             </button>
 
           </div>
