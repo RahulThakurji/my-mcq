@@ -697,7 +697,7 @@ function Quiz() {
       </div>
 
       {/* ─── Modern Toolbar ─── */}
-      {!isRetakeMode && (isSubmitted || showExp[current]) && (() => {
+      {(isSubmitted || showExp[current]) && (() => {
         const tb = {
           wrap: {
             display: "flex", flexWrap: "wrap", gap: "8px", padding: "8px 12px",
@@ -923,30 +923,30 @@ function Quiz() {
                     if (((isSubmitted && !isRetakeMode) || isDrawingMode || showExp[index]) && selectedAnswers[index] === undefined) opacity = 0.7;
                   }
 
-                return (
-                  <button
-                    key={i}
-                    onClick={() => handleClick(index, i)}
-                    disabled={isDisabled}
-                    data-mcq-btn="true"
-                    data-q-index={index}
-                    data-opt-index={i}
-                    style={{
-                      display: "block", margin: "10px 0", padding: "10px", width: "100%", maxWidth: "500px",
-                      textAlign: "left", border: "1px solid #ccc", borderRadius: "4px",
-                      background: bg,
-                      color: color,
-                      opacity: opacity,
-                      cursor: isDisabled ? "default" : "pointer",
-                      position: "relative",
-                      zIndex: isDrawingMode ? 1 : 110,
-                      pointerEvents: isDrawingMode ? "none" : "auto"
-                    }}
-                  >
-                    {opt}
-                  </button>
-                );
-              })}
+                  return (
+                    <button
+                      key={i}
+                      onClick={() => handleClick(index, i)}
+                      disabled={isDisabled}
+                      data-mcq-btn="true"
+                      data-q-index={index}
+                      data-opt-index={i}
+                      style={{
+                        display: "block", margin: "10px 0", padding: "10px", width: "100%", maxWidth: "500px",
+                        textAlign: "left", border: "1px solid #ccc", borderRadius: "4px",
+                        background: bg,
+                        color: color,
+                        opacity: opacity,
+                        cursor: isDisabled ? "default" : "pointer",
+                        position: "relative",
+                        zIndex: isDrawingMode ? 1 : 110,
+                        pointerEvents: isDrawingMode ? "none" : "auto"
+                      }}
+                    >
+                      {opt}
+                    </button>
+                  );
+                })}
 
                 {/* Show Check Answer button for both modes if selected but not revealed */}
                 {!isSubmitted && ((!isRetakeMode && selectedAnswers[index] !== undefined) || (isRetakeMode && retakeAnswers[index] !== undefined)) && !showExp[index] && (
@@ -1064,7 +1064,7 @@ function Quiz() {
           <button onClick={nextQuestion} disabled={current === questions.length - 1} style={btnBase}>Next</button>
 
           {current === questions.length - 1 && (!isRetakeMode || !retakeSubmitted) && (
-            <button 
+            <button
               onClick={() => {
                 if (isRetakeMode) {
                   setRetakeSubmitted(true);
@@ -1072,7 +1072,7 @@ function Quiz() {
                 } else {
                   submitQuiz();
                 }
-              }} 
+              }}
               style={{ ...btnBase, background: "#ff9800", color: "white", marginLeft: "auto" }}
             >
               Submit {isRetakeMode ? "Retake" : "Quiz"}
@@ -1118,9 +1118,8 @@ function Quiz() {
             </button>
             <button 
               onClick={() => { 
-                const resetState = { current: 0, retakeAnswers: {}, retakeSubmitted: false, isSubmitted: false };
+                const resetState = { current: 0, retakeAnswers: {}, retakeSubmitted: false };
                 setIsRetakeMode(true); 
-                setIsSubmitted(false);
                 setRetakeAnswers({}); 
                 setRetakeSubmitted(false); 
                 setCurrent(0); 
@@ -1132,7 +1131,7 @@ function Quiz() {
             </button>
             <button 
               onClick={() => { 
-                const resetState = { current: 0, retakeAnswers: {}, retakeSubmitted: false, showExp: {}, isSubmitted: false };
+                const resetState = { current: 0, retakeAnswers: {}, retakeSubmitted: false, isSubmitted: false, showExp: {} };
                 setIsRetakeMode(true); 
                 setIsSubmitted(false);
                 setRetakeAnswers({}); 
