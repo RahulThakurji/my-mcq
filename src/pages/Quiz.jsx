@@ -99,7 +99,7 @@ function Quiz() {
         setSelectedAnswers({});
         setShowExp({});
         setIsSubmitted(false);
-        
+
         setDoc(docRef, {
           current: 0,
           drawings: {},
@@ -298,7 +298,7 @@ function Quiz() {
 
     const canvas = canvasRefs.current[index];
     if (!canvas) return;
-    
+
     const rect = canvas.getBoundingClientRect();
     const offsetX = clientX - rect.left;
     const offsetY = clientY - rect.top;
@@ -313,7 +313,7 @@ function Quiz() {
     const state = ctx.getImageData(0, 0, canvas.width, canvas.height);
     preStrokeSnapshot.current = state;
     snapshot.current = state;
-    
+
     if (!undoHistoryRefs.current[index]) undoHistoryRefs.current[index] = [];
     undoHistoryRefs.current[index].push(state);
     if (undoHistoryRefs.current[index].length > 20) undoHistoryRefs.current[index].shift();
@@ -461,19 +461,19 @@ function Quiz() {
       });
       canvas.dataset.loaded = newDrawUrl;
     }
-    
+
     if (isHighlightErased.current) {
       const expRef = explanationRefs.current[index];
       if (expRef) {
         setSavedExplanations(prev => {
           const newExplanations = { ...prev, [index]: expRef.innerHTML };
-          
+
           // Sync both drawing and the newly erased explanation state at the same time
           setDrawings(prevDrawings => {
-             syncToCloud({ drawings: prevDrawings, savedExplanations: newExplanations });
-             return prevDrawings;
+            syncToCloud({ drawings: prevDrawings, savedExplanations: newExplanations });
+            return prevDrawings;
           });
-          
+
           return newExplanations;
         });
       }
@@ -485,7 +485,7 @@ function Quiz() {
 
   const handleUndo = (index) => {
     if (!undoHistoryRefs.current[index] || undoHistoryRefs.current[index].length === 0) return;
-    
+
     const canvas = canvasRefs.current[index];
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
@@ -493,10 +493,10 @@ function Quiz() {
     // Save current state to redo stack before undoing
     if (!redoHistoryRefs.current[index]) redoHistoryRefs.current[index] = [];
     redoHistoryRefs.current[index].push(ctx.getImageData(0, 0, canvas.width, canvas.height));
-    
+
     const previousState = undoHistoryRefs.current[index].pop();
     ctx.putImageData(previousState, 0, 0);
-    
+
     const newDrawUrl = canvas.toDataURL();
     setDrawings(prev => {
       const newDrawings = { ...prev, [index]: newDrawUrl };
@@ -545,15 +545,15 @@ function Quiz() {
     setDrawings(prev => {
       const newDrawings = { ...prev };
       delete newDrawings[index];
-      
+
       setSavedExplanations(prevExp => {
         const newExplanations = { ...prevExp };
         delete newExplanations[index];
-        
+
         syncToCloud({ drawings: newDrawings, savedExplanations: newExplanations });
         return newExplanations;
       });
-      
+
       return newDrawings;
     });
   };
@@ -638,7 +638,7 @@ function Quiz() {
       </div>
     );
   }
-  
+
   if (!quizData) return <h2>Quiz not found for {subjectName} chapter {chapterId}</h2>;
   const { questions, subjectName: subjName, chapterName } = quizData;
 
@@ -703,7 +703,7 @@ function Quiz() {
           wrap: {
             display: "flex", flexWrap: "wrap", gap: "8px", padding: "8px 12px",
             background: "linear-gradient(135deg, #1e1e2e 0%, #2a2a3e 100%)",
-            borderRadius: "12px", 
+            borderRadius: "12px",
             position: "fixed",
             bottom: "15px",
             left: "50%",
@@ -846,7 +846,7 @@ function Quiz() {
 
       {/* Main Content Area with Sidebar */}
       <div style={{ display: "flex", gap: "25px", alignItems: "flex-start", marginTop: "20px" }}>
-        
+
         {/* Quiz Area */}
         <div style={{ flex: 1, background: "white", minHeight: "400px", borderRadius: "12px", boxShadow: "0 2px 10px rgba(0,0,0,0.05)", border: "1px solid #eee", padding: "0", position: "relative", overflow: "visible" }}>
           {questions.map((q, index) => {
@@ -865,11 +865,11 @@ function Quiz() {
                   }
                 }}
                 onPointerMove={(e) => { if (isDrawing.current) draw(e, index); }}
-                onPointerUp={(e) => { 
-                  if (isDrawing.current) { 
-                    e.currentTarget.releasePointerCapture(e.pointerId); 
-                    stopDrawing(index, e.clientX, e.clientY); 
-                  } 
+                onPointerUp={(e) => {
+                  if (isDrawing.current) {
+                    e.currentTarget.releasePointerCapture(e.pointerId);
+                    stopDrawing(index, e.clientX, e.clientY);
+                  }
                 }}
                 onPointerOut={(e) => { if (isDrawing.current) stopDrawing(index); }}
                 onPointerCancel={(e) => { if (isDrawing.current) stopDrawing(index); }}
@@ -880,113 +880,113 @@ function Quiz() {
                   userSelect: isDrawingMode ? "none" : "auto",
                   WebkitUserSelect: isDrawingMode ? "none" : "auto",
                   WebkitTouchCallout: "none",
-                  cursor: isDrawingMode 
-                    ? ((isRetakeMode ? retakeSubmitted : (isSubmitted || showExp[index])) 
-                        ? (drawTool === 'eraser' ? 'cell' : 'crosshair') 
-                        : 'default') 
+                  cursor: isDrawingMode
+                    ? ((isRetakeMode ? retakeSubmitted : (isSubmitted || showExp[index]))
+                      ? (drawTool === 'eraser' ? 'cell' : 'crosshair')
+                      : 'default')
                     : 'default'
                 }}
               >
-              <h3 style={{ pointerEvents: isDrawingMode ? "none" : "auto" }}>Question {index + 1} / {questions.length}</h3>
-              <p style={{ fontSize: '1.2rem', fontWeight: 'bold', userSelect: isDrawingMode ? "none" : "auto", pointerEvents: isDrawingMode ? "none" : "auto" }}>
-                {q.question}
-              </p>
+                <h3 style={{ pointerEvents: isDrawingMode ? "none" : "auto" }}>Question {index + 1} / {questions.length}</h3>
+                <p style={{ fontSize: '1.2rem', fontWeight: 'bold', userSelect: isDrawingMode ? "none" : "auto", pointerEvents: isDrawingMode ? "none" : "auto" }}>
+                  {q.question}
+                </p>
 
-              {q.options.map((opt, i) => {
-                let isDisabled = false;
-                let bg = "#f9f9f9";
-                let color = "black";
-                let opacity = 1;
+                {q.options.map((opt, i) => {
+                  let isDisabled = false;
+                  let bg = "#f9f9f9";
+                  let color = "black";
+                  let opacity = 1;
 
-                if (isRetakeMode) {
-                  isDisabled = retakeSubmitted || retakeAnswers[index] !== undefined;
-                  if (retakeAnswers[index] !== undefined) {
-                    if (retakeSubmitted) {
-                      bg = i === q.correct ? "#4caf50" : i === retakeAnswers[index] ? "#f44336" : "#f9f9f9";
-                      color = (i === q.correct || i === retakeAnswers[index]) ? "white" : "black";
-                    } else {
-                      bg = i === retakeAnswers[index] ? "#2196f3" : "#f9f9f9";
-                      color = i === retakeAnswers[index] ? "white" : "black";
+                  if (isRetakeMode) {
+                    isDisabled = retakeSubmitted;
+                    if (retakeAnswers[index] !== undefined) {
+                      if (retakeSubmitted) {
+                        bg = i === q.correct ? "#4caf50" : i === retakeAnswers[index] ? "#f44336" : "#f9f9f9";
+                        color = (i === q.correct || i === retakeAnswers[index]) ? "white" : "black";
+                      } else {
+                        bg = i === retakeAnswers[index] ? "#2196f3" : "#f9f9f9";
+                        color = i === retakeAnswers[index] ? "white" : "black";
+                      }
                     }
+                    if (retakeSubmitted && retakeAnswers[index] === undefined) opacity = 0.7;
+                  } else {
+                    isDisabled = isSubmitted || isDrawingMode || selectedAnswers[index] !== undefined;
+                    if (selectedAnswers[index] !== undefined) {
+                      bg = i === q.correct ? "#4caf50" : i === selectedAnswers[index] ? "#f44336" : "#f9f9f9";
+                      color = (i === q.correct || i === selectedAnswers[index]) ? "white" : "black";
+                    }
+                    if ((isSubmitted || isDrawingMode) && selectedAnswers[index] === undefined) opacity = 0.7;
                   }
-                  if (retakeSubmitted && retakeAnswers[index] === undefined) opacity = 0.7;
-                } else {
-                  isDisabled = isSubmitted || isDrawingMode || selectedAnswers[index] !== undefined;
-                  if (selectedAnswers[index] !== undefined) {
-                    bg = i === q.correct ? "#4caf50" : i === selectedAnswers[index] ? "#f44336" : "#f9f9f9";
-                    color = (i === q.correct || i === selectedAnswers[index]) ? "white" : "black";
-                  }
-                  if ((isSubmitted || isDrawingMode) && selectedAnswers[index] === undefined) opacity = 0.7;
-                }
 
                 return (
-                  <button
-                    key={i}
-                    onClick={() => handleClick(index, i)}
-                    disabled={isDisabled}
-                    data-mcq-btn="true"
-                    data-q-index={index}
-                    data-opt-index={i}
-                    style={{
-                      display: "block", margin: "10px 0", padding: "10px", width: "100%", maxWidth: "500px",
-                      textAlign: "left", border: "1px solid #ccc", borderRadius: "4px",
-                      background: bg,
-                      color: color,
-                      opacity: opacity,
-                      cursor: isDisabled ? "default" : "pointer",
-                      position: "relative",
-                      zIndex: isDrawingMode ? 10 : 110,
-                      pointerEvents: isDrawingMode ? "none" : "auto"
-                    }}
-                  >
-                    {opt}
-                  </button>
+                <button
+                  key={i}
+                  onClick={() => handleClick(index, i)}
+                  disabled={isDisabled}
+                  data-mcq-btn="true"
+                  data-q-index={index}
+                  data-opt-index={i}
+                  style={{
+                    display: "block", margin: "10px 0", padding: "10px", width: "100%", maxWidth: "500px",
+                    textAlign: "left", border: "1px solid #ccc", borderRadius: "4px",
+                    background: bg,
+                    color: color,
+                    opacity: opacity,
+                    cursor: isDisabled ? "default" : "pointer",
+                    position: "relative",
+                    zIndex: isDrawingMode ? 10 : 110,
+                    pointerEvents: isDrawingMode ? "none" : "auto"
+                  }}
+                >
+                  {opt}
+                </button>
                 );
               })}
 
-              {!isRetakeMode && (isSubmitted || showExp[index]) && q.explanation && (
-                <div style={{ marginTop: "20px", position: "relative", zIndex: 10, pointerEvents: isDrawingMode ? "none" : "auto" }}>
+                {!isRetakeMode && (isSubmitted || showExp[index]) && q.explanation && (
+                  <div style={{ marginTop: "20px", position: "relative", zIndex: 10, pointerEvents: isDrawingMode ? "none" : "auto" }}>
 
-                  {/* Original Explanation with Highlighter support */}
-                  <strong>Explanation <span style={{ color: "#666", fontSize: "0.9rem", fontWeight: "normal" }}>{isHighlightMode ? "(Drag to highlight)" : ""}</span>:</strong>
-                  <div
-                    ref={el => explanationRefs.current[index] = el}
-                    onPointerUp={(e) => handleMouseUp(index)}
-                    onTouchEnd={() => handleMouseUp(index)}
+                    {/* Original Explanation with Highlighter support */}
+                    <strong>Explanation <span style={{ color: "#666", fontSize: "0.9rem", fontWeight: "normal" }}>{isHighlightMode ? "(Drag to highlight)" : ""}</span>:</strong>
+                    <div
+                      ref={el => explanationRefs.current[index] = el}
+                      onPointerUp={(e) => handleMouseUp(index)}
+                      onTouchEnd={() => handleMouseUp(index)}
+                      style={{
+                        border: "1px solid #ccc", borderRadius: "4px", padding: "15px", marginTop: "5px", background: "#fff8e1",
+                        cursor: isHighlightMode ? "text" : "default",
+                        userSelect: isHighlightMode ? "text" : "none",
+                        WebkitUserSelect: isHighlightMode ? "text" : "none",
+                        WebkitTouchCallout: "none",
+                        pointerEvents: isDrawingMode ? "none" : "auto"
+                      }}
+                      dangerouslySetInnerHTML={{ __html: savedExplanations[index] ? savedExplanations[index] : `<span>${q.explanation}</span>` }}
+                    />
+                    {savedExplanations[index] && (
+                      <button onClick={() => clearHighlight(index)} data-tap-btn="true" style={{ marginTop: "6px", padding: "4px 8px", fontSize: "0.82rem", cursor: "pointer", pointerEvents: "auto" }}>
+                        Clear Highlight
+                      </button>
+                    )}
+
+
+
+                  </div>
+                )}
+                {!isRetakeMode && (
+                  <canvas
+                    ref={el => canvasRefs.current[index] = el}
                     style={{
-                      border: "1px solid #ccc", borderRadius: "4px", padding: "15px", marginTop: "5px", background: "#fff8e1",
-                      cursor: isHighlightMode ? "text" : "default",
-                      userSelect: isHighlightMode ? "text" : "none",
-                      WebkitUserSelect: isHighlightMode ? "text" : "none",
-                      WebkitTouchCallout: "none",
-                      pointerEvents: isDrawingMode ? "none" : "auto"
+                      position: "absolute", top: 0, left: 0, zIndex: 100,
+                      opacity: 1,
+                      pointerEvents: "none",
+                      touchAction: "none"
                     }}
-                    dangerouslySetInnerHTML={{ __html: savedExplanations[index] ? savedExplanations[index] : `<span>${q.explanation}</span>` }}
                   />
-                  {savedExplanations[index] && (
-                    <button onClick={() => clearHighlight(index)} data-tap-btn="true" style={{ marginTop: "6px", padding: "4px 8px", fontSize: "0.82rem", cursor: "pointer", pointerEvents: "auto" }}>
-                      Clear Highlight
-                    </button>
-                  )}
-
-
-
-                </div>
-              )}
-              {!isRetakeMode && (
-                <canvas
-                  ref={el => canvasRefs.current[index] = el}
-                  style={{
-                    position: "absolute", top: 0, left: 0, zIndex: 100,
-                    opacity: 1,
-                    pointerEvents: "none",
-                    touchAction: "none"
-                  }}
-                />
-              )}
-            </div>
-          );
-        })}
+                )}
+              </div>
+            );
+          })}
         </div>
 
         {/* Sidebar Question Palette */}
@@ -998,12 +998,12 @@ function Quiz() {
           <h3 style={{ fontSize: "0.95rem", marginBottom: "12px", color: "#333", borderBottom: "1px solid #eee", paddingBottom: "8px", display: "flex", justifyContent: "space-between" }}>
             Palette <span>{questions.length} Qs</span>
           </h3>
-          
+
           <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "6px" }}>
             {questions.map((_, index) => {
               const isAnswered = isRetakeMode ? retakeAnswers[index] !== undefined : selectedAnswers[index] !== undefined;
               const isCurrent = current === index;
-              
+
               return (
                 <button
                   key={index}
@@ -1025,15 +1025,15 @@ function Quiz() {
           </div>
 
           <div style={{ marginTop: "25px", paddingTop: "15px", borderTop: "1px solid #eee", fontSize: "0.75rem", fontWeight: "600", color: "#777" }}>
-             <div style={{ display: "flex", gap: "10px", marginBottom: "10px", alignItems: "center" }}>
-                <div style={{ width: "14px", height: "14px", background: "#7c6fff", borderRadius: "4px" }} /> <span>Current Question</span>
-             </div>
-             <div style={{ display: "flex", gap: "10px", marginBottom: "10px", alignItems: "center" }}>
-                <div style={{ width: "14px", height: "14px", background: "#2ed573", borderRadius: "4px" }} /> <span>Answered</span>
-             </div>
-             <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
-                <div style={{ width: "14px", height: "14px", background: "#f8f9fa", border: "1px solid #ddd", borderRadius: "4px" }} /> <span>Not Answered</span>
-             </div>
+            <div style={{ display: "flex", gap: "10px", marginBottom: "10px", alignItems: "center" }}>
+              <div style={{ width: "14px", height: "14px", background: "#7c6fff", borderRadius: "4px" }} /> <span>Current Question</span>
+            </div>
+            <div style={{ display: "flex", gap: "10px", marginBottom: "10px", alignItems: "center" }}>
+              <div style={{ width: "14px", height: "14px", background: "#2ed573", borderRadius: "4px" }} /> <span>Answered</span>
+            </div>
+            <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+              <div style={{ width: "14px", height: "14px", background: "#f8f9fa", border: "1px solid #ddd", borderRadius: "4px" }} /> <span>Not Answered</span>
+            </div>
           </div>
         </div>
       </div>
