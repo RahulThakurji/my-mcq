@@ -55,10 +55,11 @@ function Quiz() {
   const pendingUpdatesRef = useRef({});
   const syncTimeoutRef = useRef(null);
 
-  // Snapshots for shapes
+  // Snapshots and Smoothing for shapes
   const startX = useRef(0);
   const startY = useRef(0);
   const snapshot = useRef(null);
+  const smoothingPos = useRef({ x: 0, y: 0 }); // Handwriting EMA origin
 
   // Auto-Snap Feature Refs
   const strokePoints = useRef([]);
@@ -375,6 +376,7 @@ function Quiz() {
 
     redoHistoryRefs.current[index] = [];
     strokePoints.current = [{ x: offsetX, y: offsetY }];
+    smoothingPos.current = { x: offsetX, y: offsetY }; // Initialize EMA smoothing origin
     updateHistoryState(index);
 
     ctx.beginPath();
@@ -389,17 +391,35 @@ function Quiz() {
     if (!ctx) return;
 
     const rect = canvas.getBoundingClientRect();
-    const offsetX = nativeEvent.clientX - rect.left;
-    const offsetY = nativeEvent.clientY - rect.top;
+    const rawX = nativeEvent.clientX - rect.left;
+    const rawY = nativeEvent.clientY - rect.top;
 
-    strokePoints.current.push({ x: offsetX, y: offsetY });
+    // --- HANDWRITING SMOOTHING LOGIC ---
+    if (drawTool === 'pen' || drawTool === 'eraser') {
+      // 1. Anti-Jitter: Ignore microscopic sensor noise
+      const dist = Math.hypot(rawX - smoothingPos.current.x, rawY - smoothingPos.current.y);
+      if (dist < 1.5) return;
+
+      // 2. Exponential Moving Average (EMA) for butter-smooth lines
+      const tension = 0.55;
+      const smoothX = smoothingPos.current.x + (rawX - smoothingPos.current.x) * tension;
+      const smoothY = smoothingPos.current.y + (rawY - smoothingPos.current.y) * tension;
+
+      smoothingPos.current = { x: smoothX, y: smoothY };
+      strokePoints.current.push({ x: smoothX, y: smoothY });
+    } else {
+      // Shape tools need exact raw coordinates
+      strokePoints.current.push({ x: rawX, y: rawY });
+    }
+    // ------------------------------------
+
     const pts = strokePoints.current;
 
     const drawSmoothCurve = () => {
       if (pts.length >= 3) {
         const prev = pts[pts.length - 3];
         const mid1 = { x: (prev.x + pts[pts.length - 2].x) / 2, y: (prev.y + pts[pts.length - 2].y) / 2 };
-        const mid2 = { x: (pts[pts.length - 2].x + offsetX) / 2, y: (pts[pts.length - 2].y + offsetY) / 2 };
+        const mid2 = { x: (pts[pts.length - 2].x + pts[pts.length - 1].x) / 2, y: (pts[pts.length - 2].y + pts[pts.length - 1].y) / 2 };
         ctx.beginPath();
         ctx.moveTo(mid1.x, mid1.y);
         ctx.quadraticCurveTo(pts[pts.length - 2].x, pts[pts.length - 2].y, mid2.x, mid2.y);
@@ -407,7 +427,7 @@ function Quiz() {
       } else {
         ctx.beginPath();
         ctx.moveTo(pts[0].x, pts[0].y);
-        ctx.lineTo(offsetX, offsetY);
+        ctx.lineTo(pts[pts.length - 1].x, pts[pts.length - 1].y);
         ctx.stroke();
       }
     };
@@ -474,13 +494,13 @@ function Quiz() {
 
       if (drawTool === 'line') {
         ctx.moveTo(startX.current, startY.current);
-        ctx.lineTo(offsetX, offsetY);
+        ctx.lineTo(rawX, rawY);
       } else if (drawTool === 'rectangle') {
-        const width = offsetX - startX.current;
-        const height = offsetY - startY.current;
+        const width = rawX - startX.current;
+        const height = rawY - startY.current;
         ctx.rect(startX.current, startY.current, width, height);
       } else if (drawTool === 'circle') {
-        const radius = Math.sqrt(Math.pow(offsetX - startX.current, 2) + Math.pow(offsetY - startY.current, 2));
+        const radius = Math.sqrt(Math.pow(rawX - startX.current, 2) + Math.pow(rawY - startY.current, 2));
         ctx.arc(startX.current, startY.current, radius, 0, 2 * Math.PI);
       }
       ctx.stroke();
