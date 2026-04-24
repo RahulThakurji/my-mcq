@@ -198,12 +198,15 @@ function Quiz() {
     if (isRetakeMode) {
       if (retakeSubmitted) return;
       setRetakeAnswers(prev => {
+        let newAnswers;
         if (prev[qIdx] === optIdx) {
-          const newAnswers = { ...prev };
+          newAnswers = { ...prev };
           delete newAnswers[qIdx];
-          return newAnswers;
+        } else {
+          newAnswers = { ...prev, [qIdx]: optIdx };
         }
-        return { ...prev, [qIdx]: optIdx };
+        syncToCloud({ retakeAnswers: newAnswers });
+        return newAnswers;
       });
       return;
     }
@@ -880,7 +883,7 @@ function Quiz() {
                   cursor: isDrawingMode 
                     ? ((isRetakeMode ? retakeSubmitted : (isSubmitted || showExp[index])) 
                         ? (drawTool === 'eraser' ? 'cell' : 'crosshair') 
-                        : 'not-allowed') 
+                        : 'default') 
                     : 'default'
                 }}
               >
