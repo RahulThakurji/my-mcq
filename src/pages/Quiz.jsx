@@ -935,6 +935,7 @@ function Quiz() {
                       opacity: opacity,
                       cursor: isDisabled ? "default" : "pointer",
                       position: "relative",
+                      zIndex: isDrawingMode ? 10 : 110,
                       pointerEvents: isDrawingMode ? "none" : "auto"
                     }}
                   >
