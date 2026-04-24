@@ -40,6 +40,7 @@ function Quiz() {
   const [penWidth, setPenWidth] = useState(2);
 
   const [drawings, setDrawings] = useState({});
+  const [historyState, setHistoryState] = useState({});
 
   const canvasRefs = useRef({});
   const undoHistoryRefs = useRef({});
@@ -48,6 +49,10 @@ function Quiz() {
   const explanationRefs = useRef({});
   const activeCanvasIndex = useRef(null);
   const isDrawing = useRef(false);
+
+  // --- CLOUD SYNC OPTIMIZATION REFS ---
+  const pendingUpdatesRef = useRef({});
+  const syncTimeoutRef = useRef(null);
 
   // Snapshots for shapes
   const startX = useRef(0);
@@ -61,6 +66,16 @@ function Quiz() {
   const lastPos = useRef({ x: 0, y: 0 });
   const isSnapped = useRef(false);
   const isHighlightErased = useRef(false);
+
+  const updateHistoryState = (index) => {
+    setHistoryState(prev => ({
+      ...prev,
+      [index]: {
+        undo: undoHistoryRefs.current[index]?.length || 0,
+        redo: redoHistoryRefs.current[index]?.length || 0
+      }
+    }));
+  };
 
   useEffect(() => {
     loadQuiz(subjectName, chapterId).then(data => {
@@ -76,7 +91,8 @@ function Quiz() {
     }
 
     const docRef = doc(db, 'users', user.uid, 'quizzes', `${subjectName}-${chapterId}`);
-    const unsubscribe = onSnapshot(docRef, { includeMetadataChanges: true }, (docSnap) => {
+
+    const unsubscribe = onSnapshot(docRef, (docSnap) => {
       if (docSnap.exists() && !docSnap.metadata.hasPendingWrites) {
         const data = docSnap.data();
         if (data.drawings !== undefined) setDrawings(data.drawings);
@@ -107,45 +123,76 @@ function Quiz() {
     return () => unsubscribe();
   }, [user, subjectName, chapterId]);
 
+  // SAFETY NET: Flush queue if user tries to close the tab or unmounts component
   useEffect(() => {
     const handleBeforeUnload = (e) => {
-      if (isSaving) {
+      if (Object.keys(pendingUpdatesRef.current).length > 0) {
         e.preventDefault();
-        e.returnValue = "Your data is currently saving to the cloud. Are you sure you want to leave?";
+        e.returnValue = "Saving notes to cloud, please wait...";
       }
     };
     window.addEventListener("beforeunload", handleBeforeUnload);
-    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, [isSaving]);
 
-  const syncToCloud = async (updates) => {
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+      // Force sync any remaining data on component unmount
+      if (user && Object.keys(pendingUpdatesRef.current).length > 0) {
+        const docRef = doc(db, 'users', user.uid, 'quizzes', `${subjectName}-${chapterId}`);
+        updateDoc(docRef, pendingUpdatesRef.current).catch(() => { });
+      }
+    };
+  }, [user, subjectName, chapterId]);
+
+  // --- OPTIMIZED CLOUD SYNC ENGINE ---
+  const syncToCloud = async (updates, immediate = false) => {
     if (!user) {
       if (!window.hasAlertedForLoginGeneral) {
-        alert("You are not logged in! Your progress will not be saved to the cloud.");
+        alert("You are not logged in! Progress will not be saved.");
         window.hasAlertedForLoginGeneral = true;
       }
       return;
     }
 
-    const docRef = doc(db, 'users', user.uid, 'quizzes', `${subjectName}-${chapterId}`);
+    // Merge new updates into the queue
+    pendingUpdatesRef.current = { ...pendingUpdatesRef.current, ...updates };
     setIsSaving(true);
 
-    try {
-      await updateDoc(docRef, updates);
-    } catch (error) {
-      if (error.code === 'not-found' || error.code === 'firestore/not-found' || String(error).includes('not-found')) {
-        try {
-          await setDoc(docRef, updates);
-        } catch (setDocError) {
-          console.error("Error creating document:", setDocError);
-          alert(`Firestore Error (Create): ${setDocError.message}. Please check your Firebase rules!`);
-        }
-      } else {
-        console.error("Error syncing progress:", error);
-        alert(`Firestore Error (Update): ${error.message}. Please check your Firebase rules!`);
+    const performSync = async () => {
+      const updatesToApply = { ...pendingUpdatesRef.current };
+      if (Object.keys(updatesToApply).length === 0) {
+        setIsSaving(false);
+        return;
       }
-    } finally {
-      setIsSaving(false);
+
+      // Clear queue instantly so new edits queue up properly
+      pendingUpdatesRef.current = {};
+      const docRef = doc(db, 'users', user.uid, 'quizzes', `${subjectName}-${chapterId}`);
+
+      try {
+        await updateDoc(docRef, updatesToApply);
+      } catch (error) {
+        if (error.code === 'not-found' || String(error).includes('not-found')) {
+          try {
+            await setDoc(docRef, updatesToApply);
+          } catch (setDocError) {
+            console.error("Error creating document:", setDocError);
+          }
+        } else {
+          console.error("Error syncing progress:", error);
+        }
+      } finally {
+        // Only hide saving UI if no new edits sneaked into the queue during upload
+        if (Object.keys(pendingUpdatesRef.current).length === 0) {
+          setIsSaving(false);
+        }
+      }
+    };
+
+    clearTimeout(syncTimeoutRef.current);
+    if (immediate) {
+      performSync();
+    } else {
+      syncTimeoutRef.current = setTimeout(performSync, 1500);
     }
   };
 
@@ -174,11 +221,7 @@ function Quiz() {
           }
 
           const ctx = canvas.getContext('2d');
-
-          if (needsResize) {
-            ctx.scale(ratio, ratio);
-          }
-
+          if (needsResize) ctx.scale(ratio, ratio);
           ctx.clearRect(0, 0, canvas.width, canvas.height);
 
           if (drawings[index]) {
@@ -196,14 +239,17 @@ function Quiz() {
     });
   }, [current, isDrawingMode, quizData, isSubmitted, isInitialLoadComplete, drawings, showExp]);
 
+  // Turn off drawing modes and sync immediately when navigating questions
   const handleQuestionChange = (newIndex) => {
     setCurrent(newIndex);
-    if (!isRetakeMode) syncToCloud({ current: newIndex });
+    setIsDrawingMode(false);
+    setIsHighlightMode(false);
+    if (!isRetakeMode) syncToCloud({ current: newIndex }, true);
   };
 
   const handleShowExplanation = (index) => {
     setShowExp(prev => ({ ...prev, [index]: true }));
-    syncToCloud({ showExp: { ...showExp, [index]: true }, current: current });
+    syncToCloud({ showExp: { ...showExp, [index]: true }, current: current }, true);
   };
 
   const nextQuestion = () => { if (current < questions.length - 1) handleQuestionChange(current + 1); };
@@ -212,7 +258,7 @@ function Quiz() {
   const submitQuiz = () => {
     let newDrawings = drawings;
     setIsSubmitted(true);
-    syncToCloud({ drawings: newDrawings, isSubmitted: true });
+    syncToCloud({ drawings: newDrawings, isSubmitted: true }, true);
   };
 
   const handleClick = (qIdx, optIdx) => {
@@ -235,7 +281,7 @@ function Quiz() {
 
     setSelectedAnswers(prevAnswers => {
       const newSelectedAnswers = { ...prevAnswers, [qIdx]: optIdx };
-      syncToCloud({ selectedAnswers: newSelectedAnswers, current: current });
+      syncToCloud({ selectedAnswers: newSelectedAnswers, current: current }, true);
       return newSelectedAnswers;
     });
   };
@@ -321,15 +367,19 @@ function Quiz() {
     startY.current = offsetY;
 
     const state = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const expRef = explanationRefs.current[index];
+    const htmlState = expRef ? expRef.innerHTML : "";
+
     preStrokeSnapshot.current = state;
     snapshot.current = state;
 
     if (!undoHistoryRefs.current[index]) undoHistoryRefs.current[index] = [];
-    undoHistoryRefs.current[index].push(state);
+    undoHistoryRefs.current[index].push({ canvas: state, html: htmlState });
     if (undoHistoryRefs.current[index].length > 20) undoHistoryRefs.current[index].shift();
 
     redoHistoryRefs.current[index] = [];
     strokePoints.current = [{ x: offsetX, y: offsetY }];
+    updateHistoryState(index);
 
     ctx.beginPath();
     ctx.moveTo(offsetX, offsetY);
@@ -374,33 +424,33 @@ function Quiz() {
       ctx.shadowBlur = 0;
       drawSmoothCurve();
 
-      const elementsUnderCursor = document.elementsFromPoint(nativeEvent.clientX, nativeEvent.clientY);
-      const highlightedSpan = elementsUnderCursor.find(el => el.tagName === 'SPAN' && el.style.backgroundColor);
-      if (highlightedSpan) {
-        const expRef = explanationRefs.current[index];
-        if (expRef && expRef.contains(highlightedSpan)) {
-          const parent = highlightedSpan.parentNode;
-          while (highlightedSpan.firstChild) {
-            parent.insertBefore(highlightedSpan.firstChild, highlightedSpan);
+      const expRef = explanationRefs.current[index];
+      if (expRef) {
+        const spans = expRef.querySelectorAll('span[style*="background-color"]');
+        spans.forEach(span => {
+          const rects = span.getClientRects();
+          let hit = false;
+          for (let i = 0; i < rects.length; i++) {
+            const rect = rects[i];
+            if (nativeEvent.clientX >= rect.left - 5 && nativeEvent.clientX <= rect.right + 5 &&
+              nativeEvent.clientY >= rect.top - 5 && nativeEvent.clientY <= rect.bottom + 5) {
+              hit = true;
+              break;
+            }
           }
-          parent.removeChild(highlightedSpan);
-          isHighlightErased.current = true;
-        }
+          if (hit) {
+            const parent = span.parentNode;
+            while (span.firstChild) {
+              parent.insertBefore(span.firstChild, span);
+            }
+            parent.removeChild(span);
+            isHighlightErased.current = true;
+          }
+        });
       }
-
-    } else if (drawTool === 'canvas-highlighter') {
-      ctx.globalCompositeOperation = 'multiply';
-      ctx.globalAlpha = 0.6;
-      ctx.strokeStyle = highlightColor;
-      ctx.lineWidth = Math.max(15, penWidth * 3);
-      ctx.lineJoin = 'round';
-      ctx.lineCap = 'round';
-      ctx.shadowBlur = 0;
-      drawSmoothCurve();
 
     } else if (drawTool === 'pen') {
       if (isSnapped.current) return;
-
       ctx.globalCompositeOperation = 'source-over';
       ctx.globalAlpha = 1.0;
       ctx.strokeStyle = penColor;
@@ -409,7 +459,6 @@ function Quiz() {
       ctx.lineCap = 'round';
       ctx.shadowBlur = 0.5;
       ctx.shadowColor = penColor;
-
       drawSmoothCurve();
 
       clearTimeout(holdTimeout.current);
@@ -469,10 +518,10 @@ function Quiz() {
     if (ctx) ctx.closePath();
 
     if (canvas) {
-      const newDrawUrl = canvas.toDataURL();
+      const newDrawUrl = canvas.toDataURL(); // Generate Base64
       setDrawings(prev => {
         const newDrawings = { ...prev, [index]: newDrawUrl };
-        if (!isHighlightErased.current) syncToCloud({ drawings: newDrawings });
+        if (!isHighlightErased.current) syncToCloud({ drawings: newDrawings }); // Debounced Call
         return newDrawings;
       });
       canvas.dataset.loaded = newDrawUrl;
@@ -484,7 +533,7 @@ function Quiz() {
         setSavedExplanations(prev => {
           const newExplanations = { ...prev, [index]: expRef.innerHTML };
           setDrawings(prevDrawings => {
-            syncToCloud({ drawings: prevDrawings, savedExplanations: newExplanations });
+            syncToCloud({ drawings: prevDrawings, savedExplanations: newExplanations }); // Debounced Call
             return prevDrawings;
           });
           return newExplanations;
@@ -498,52 +547,110 @@ function Quiz() {
   const handleUndo = (index) => {
     if (!undoHistoryRefs.current[index] || undoHistoryRefs.current[index].length === 0) return;
     const canvas = canvasRefs.current[index];
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas?.getContext('2d');
+    const expRef = explanationRefs.current[index];
+
+    const currentCanvasState = ctx ? ctx.getImageData(0, 0, canvas.width, canvas.height) : null;
+    const currentHtmlState = expRef ? expRef.innerHTML : "";
 
     if (!redoHistoryRefs.current[index]) redoHistoryRefs.current[index] = [];
-    redoHistoryRefs.current[index].push(ctx.getImageData(0, 0, canvas.width, canvas.height));
+    redoHistoryRefs.current[index].push({ canvas: currentCanvasState, html: currentHtmlState });
 
-    const previousState = undoHistoryRefs.current[index].pop();
-    ctx.putImageData(previousState, 0, 0);
+    const prevState = undoHistoryRefs.current[index].pop();
+    updateHistoryState(index);
 
-    const newDrawUrl = canvas.toDataURL();
-    setDrawings(prev => {
-      const newDrawings = { ...prev, [index]: newDrawUrl };
-      if (!isRetakeMode) syncToCloud({ drawings: newDrawings });
-      return newDrawings;
+    let newDrawUrl = null;
+    let newHtml = null;
+
+    if (ctx && prevState.canvas) {
+      ctx.putImageData(prevState.canvas, 0, 0);
+      newDrawUrl = canvas.toDataURL();
+      canvas.dataset.loaded = newDrawUrl;
+    }
+
+    if (expRef && prevState.html !== undefined) {
+      expRef.innerHTML = prevState.html;
+      newHtml = prevState.html;
+    }
+
+    setDrawings(prevD => {
+      const nextD = newDrawUrl !== null ? { ...prevD, [index]: newDrawUrl } : prevD;
+      setSavedExplanations(prevE => {
+        const nextE = newHtml !== null ? { ...prevE, [index]: newHtml } : prevE;
+        if (!isRetakeMode) {
+          const updates = {};
+          if (newDrawUrl !== null) updates.drawings = nextD;
+          if (newHtml !== null) updates.savedExplanations = nextE;
+          if (Object.keys(updates).length > 0) syncToCloud(updates);
+        }
+        return nextE;
+      });
+      return nextD;
     });
-    canvas.dataset.loaded = newDrawUrl;
   };
 
   const handleRedo = (index) => {
     if (!redoHistoryRefs.current[index] || redoHistoryRefs.current[index].length === 0) return;
     const canvas = canvasRefs.current[index];
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas?.getContext('2d');
+    const expRef = explanationRefs.current[index];
+
+    const currentCanvasState = ctx ? ctx.getImageData(0, 0, canvas.width, canvas.height) : null;
+    const currentHtmlState = expRef ? expRef.innerHTML : "";
 
     if (!undoHistoryRefs.current[index]) undoHistoryRefs.current[index] = [];
-    undoHistoryRefs.current[index].push(ctx.getImageData(0, 0, canvas.width, canvas.height));
+    undoHistoryRefs.current[index].push({ canvas: currentCanvasState, html: currentHtmlState });
 
     const nextState = redoHistoryRefs.current[index].pop();
-    ctx.putImageData(nextState, 0, 0);
+    updateHistoryState(index);
 
-    const newDrawUrl = canvas.toDataURL();
-    setDrawings(prev => {
-      const newDrawings = { ...prev, [index]: newDrawUrl };
-      if (!isRetakeMode) syncToCloud({ drawings: newDrawings });
-      return newDrawings;
+    let newDrawUrl = null;
+    let newHtml = null;
+
+    if (ctx && nextState.canvas) {
+      ctx.putImageData(nextState.canvas, 0, 0);
+      newDrawUrl = canvas.toDataURL();
+      canvas.dataset.loaded = newDrawUrl;
+    }
+
+    if (expRef && nextState.html !== undefined) {
+      expRef.innerHTML = nextState.html;
+      newHtml = nextState.html;
+    }
+
+    setDrawings(prevD => {
+      const nextD = newDrawUrl !== null ? { ...prevD, [index]: newDrawUrl } : prevD;
+      setSavedExplanations(prevE => {
+        const nextE = newHtml !== null ? { ...prevE, [index]: newHtml } : prevE;
+        if (!isRetakeMode) {
+          const updates = {};
+          if (newDrawUrl !== null) updates.drawings = nextD;
+          if (newHtml !== null) updates.savedExplanations = nextE;
+          if (Object.keys(updates).length > 0) syncToCloud(updates);
+        }
+        return nextE;
+      });
+      return nextD;
     });
-    canvas.dataset.loaded = newDrawUrl;
   };
 
   const clearPage = (index) => {
     const canvas = canvasRefs.current[index];
+    const expRef = explanationRefs.current[index];
+
+    const canvasState = canvas ? canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height) : null;
+    const htmlState = expRef ? expRef.innerHTML : "";
+
+    if (!undoHistoryRefs.current[index]) undoHistoryRefs.current[index] = [];
+    undoHistoryRefs.current[index].push({ canvas: canvasState, html: htmlState });
+    if (undoHistoryRefs.current[index].length > 20) undoHistoryRefs.current[index].shift();
+    redoHistoryRefs.current[index] = [];
+    updateHistoryState(index);
+
     if (canvas) {
       canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
       canvas.dataset.loaded = "empty";
     }
-    const expRef = explanationRefs.current[index];
     if (expRef) expRef.innerHTML = questions[index].explanation;
 
     setDrawings(prev => {
@@ -552,7 +659,7 @@ function Quiz() {
       setSavedExplanations(prevExp => {
         const newExplanations = { ...prevExp };
         delete newExplanations[index];
-        syncToCloud({ drawings: newDrawings, savedExplanations: newExplanations });
+        syncToCloud({ drawings: newDrawings, savedExplanations: newExplanations }, true); // Force flush immediate
         return newExplanations;
       });
       return newDrawings;
@@ -568,7 +675,7 @@ function Quiz() {
       setIsRetakeMode(false);
       setIsDrawingMode(false);
       setIsHighlightMode(false);
-      syncToCloud({ isSubmitted: false, selectedAnswers: {}, showExp: {}, current: 0 });
+      syncToCloud({ isSubmitted: false, selectedAnswers: {}, showExp: {}, current: 0 }, true);
     }
   };
 
@@ -581,6 +688,10 @@ function Quiz() {
       setIsSubmitted(false);
       setCurrent(0);
 
+      undoHistoryRefs.current = {};
+      redoHistoryRefs.current = {};
+      setHistoryState({});
+
       questions.forEach((_, index) => {
         const canvas = canvasRefs.current[index];
         if (canvas) {
@@ -590,7 +701,7 @@ function Quiz() {
         const expRef = explanationRefs.current[index];
         if (expRef) expRef.innerHTML = questions[index].explanation;
       });
-      syncToCloud({ drawings: {}, savedExplanations: {}, selectedAnswers: {}, showExp: {}, isSubmitted: false, current: 0 });
+      syncToCloud({ drawings: {}, savedExplanations: {}, selectedAnswers: {}, showExp: {}, isSubmitted: false, current: 0 }, true);
     }
   };
 
@@ -608,6 +719,19 @@ function Quiz() {
       window.hasAlertedForLoginHighlight = true;
     }
 
+    const expRef = explanationRefs.current[index];
+    if (!expRef) return;
+
+    const htmlState = expRef.innerHTML;
+    const canvas = canvasRefs.current[index];
+    const canvasState = canvas ? canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height) : null;
+
+    if (!undoHistoryRefs.current[index]) undoHistoryRefs.current[index] = [];
+    undoHistoryRefs.current[index].push({ canvas: canvasState, html: htmlState });
+    if (undoHistoryRefs.current[index].length > 20) undoHistoryRefs.current[index].shift();
+    redoHistoryRefs.current[index] = [];
+    updateHistoryState(index);
+
     try {
       const span = document.createElement("span");
       span.style.backgroundColor = highlightColor;
@@ -618,39 +742,49 @@ function Quiz() {
       range.surroundContents(span);
       selection.removeAllRanges();
 
-      const expRef = explanationRefs.current[index];
-      if (!expRef) return;
-
       setSavedExplanations(prev => {
         const newExplanations = { ...prev, [index]: expRef.innerHTML };
-        syncToCloud({ savedExplanations: newExplanations });
+        syncToCloud({ savedExplanations: newExplanations }); // Debounced
         return newExplanations;
       });
     } catch (err) {
+      undoHistoryRefs.current[index].pop();
+      updateHistoryState(index);
       console.log("Cross-node highlighting block:", err);
     }
   };
 
   const clearHighlight = (index) => {
+    const expRef = explanationRefs.current[index];
+    if (!expRef) return;
+
+    const htmlState = expRef.innerHTML;
+    const canvas = canvasRefs.current[index];
+    const canvasState = canvas ? canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height) : null;
+
+    if (!undoHistoryRefs.current[index]) undoHistoryRefs.current[index] = [];
+    undoHistoryRefs.current[index].push({ canvas: canvasState, html: htmlState });
+    if (undoHistoryRefs.current[index].length > 20) undoHistoryRefs.current[index].shift();
+    redoHistoryRefs.current[index] = [];
+    updateHistoryState(index);
+
     setSavedExplanations(prev => {
       const newExplanations = { ...prev };
       delete newExplanations[index];
-      syncToCloud({ savedExplanations: newExplanations });
+      syncToCloud({ savedExplanations: newExplanations }, true); // Force immediate flush on manual clear
       return newExplanations;
     });
 
-    const expRef = explanationRefs.current[index];
-    if (expRef) expRef.innerHTML = questions[index].explanation;
+    expRef.innerHTML = questions[index].explanation;
   };
 
-  // --- DYNAMIC CURSOR GENERATOR ---
   const getCustomCursor = () => {
     if (!isDrawingMode) return 'default';
     if (drawTool === 'eraser') return `url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2"><circle cx="12" cy="12" r="10" fill="white" opacity="0.8"/></svg>') 12 12, cell`;
 
-    const color = drawTool === 'canvas-highlighter' ? highlightColor : penColor;
-    const size = drawTool === 'canvas-highlighter' ? Math.max(15, penWidth * 3) : penWidth;
-    const opacity = drawTool === 'canvas-highlighter' ? 0.6 : 1;
+    const color = penColor;
+    const size = penWidth;
+    const opacity = 1;
 
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size + 4}" height="${size + 4}" viewBox="0 0 ${size + 4} ${size + 4}"><circle cx="${(size + 4) / 2}" cy="${(size + 4) / 2}" r="${size / 2}" fill="${encodeURIComponent(color)}" fill-opacity="${opacity}" stroke="rgba(0,0,0,0.1)" stroke-width="1"/></svg>`;
     return `url('data:image/svg+xml;utf8,${svg}') ${(size + 4) / 2} ${(size + 4) / 2}, crosshair`;
@@ -723,13 +857,15 @@ function Quiz() {
             border: "3px solid rgba(133,100,4,0.3)", borderRadius: "50%",
             borderTopColor: "#856404", animation: "spin 1s ease-in-out infinite"
           }} />
-          ☁️ Data is storing in cloud, wait...
+          ☁️ Syncing with Cloud...
           <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
         </div>
       )}
 
-      {/* ─── Modern Toolbar ─── */}
       {!isRetakeMode && (isSubmitted || showExp[current]) && (() => {
+        const canUndo = historyState[current]?.undo > 0;
+        const canRedo = historyState[current]?.redo > 0;
+
         const tb = {
           wrap: {
             display: "flex", flexWrap: "wrap", gap: "8px", padding: "8px 12px",
@@ -759,10 +895,10 @@ function Quiz() {
             fontWeight: 600, fontSize: "0.78rem", background: active ? "rgba(124,111,255,0.35)" : "rgba(255,255,255,0.07)",
             color: active ? "#c9c4ff" : "#bbb", transition: "all 0.2s"
           }),
-          undoBtn: {
-            display: "inline-flex", alignItems: "center", gap: "4px", padding: "5px 10px", border: "1px solid rgba(255,255,255,0.15)", borderRadius: "6px", cursor: "pointer",
-            fontWeight: 600, fontSize: "0.78rem", background: "rgba(255,255,255,0.06)", color: "#ccc"
-          }
+          undoBtn: (active) => ({
+            display: "inline-flex", alignItems: "center", gap: "4px", padding: "5px 10px", border: "1px solid rgba(255,255,255,0.15)", borderRadius: "6px", cursor: active ? "pointer" : "not-allowed",
+            fontWeight: 600, fontSize: "0.78rem", background: "rgba(255,255,255,0.06)", color: "#ccc", transition: "all 0.2s", opacity: active ? 1 : 0.4
+          })
         };
 
         const penColors = [
@@ -772,19 +908,51 @@ function Quiz() {
         ];
         const hlColors = [{ c: '#FFF800', n: 'Yellow' }, { c: '#00FF66', n: 'Green' }, { c: '#FF007F', n: 'Pink' }, { c: '#00E5FF', n: 'Blue' }];
         const tools = [
-          { v: 'pen', icon: '✏️', label: 'Pen' }, { v: 'canvas-highlighter', icon: '🖊️', label: 'Marker' },
+          { v: 'pen', icon: '✏️', label: 'Pen' },
           { v: 'line', icon: '╱', label: 'Line' }, { v: 'rectangle', icon: '▭', label: 'Rect' },
-          { v: 'circle', icon: '◯', label: 'Circle' }, { v: 'eraser', icon: '🧽', label: 'Eraser' }
+          { v: 'circle', icon: '◯', label: 'Circle' }
         ];
 
         return (
           <div style={tb.wrap}>
-            <button onClick={() => { setIsDrawingMode(!isDrawingMode); setIsHighlightMode(false); }} style={tb.pill(isDrawingMode, '#7c6fff', '#4a90d9')}>
-              ✏️ {isDrawingMode ? 'Close Pen' : 'Pen'}
+            <button onClick={() => {
+              if (isDrawingMode && drawTool !== 'eraser') setIsDrawingMode(false);
+              else { setIsDrawingMode(true); setIsHighlightMode(false); if (drawTool === 'eraser') setDrawTool('pen'); }
+            }} style={tb.pill(isDrawingMode && drawTool !== 'eraser', '#7c6fff', '#4a90d9')}>
+              ✏️ Pen
             </button>
 
-            <button onClick={() => { setIsHighlightMode(!isHighlightMode); setIsDrawingMode(false); }} style={tb.pill(isHighlightMode, '#ff9f43', '#ee5a24')}>
-              🖍️ {isHighlightMode ? 'Close' : 'Highlighter'}
+            <button onClick={() => {
+              if (isHighlightMode) setIsHighlightMode(false);
+              else { setIsHighlightMode(true); setIsDrawingMode(false); }
+            }} style={tb.pill(isHighlightMode, '#ff9f43', '#ee5a24')}>
+              🖍️ Highlighter
+            </button>
+
+            <button onClick={() => {
+              if (isDrawingMode && drawTool === 'eraser') setIsDrawingMode(false);
+              else { setIsDrawingMode(true); setIsHighlightMode(false); setDrawTool('eraser'); }
+            }} style={tb.pill(isDrawingMode && drawTool === 'eraser', '#ff4757', '#c0392b')}>
+              🧽 Eraser
+            </button>
+
+            <div style={tb.sep} />
+
+            <button
+              onClick={() => canUndo && handleUndo(current)}
+              style={tb.undoBtn(canUndo)}
+              title="Undo Session Action"
+              disabled={!canUndo}
+            >
+              ↩ Undo
+            </button>
+            <button
+              onClick={() => canRedo && handleRedo(current)}
+              style={tb.undoBtn(canRedo)}
+              title="Redo Session Action"
+              disabled={!canRedo}
+            >
+              ↪ Redo
             </button>
 
             {isHighlightMode && (
@@ -799,7 +967,7 @@ function Quiz() {
               </>
             )}
 
-            {isDrawingMode && (
+            {isDrawingMode && drawTool !== 'eraser' && (
               <>
                 <div style={tb.sep} />
                 <div style={tb.card}>
@@ -808,44 +976,34 @@ function Quiz() {
                   ))}
                 </div>
 
-                <button onClick={() => handleUndo(current)} style={tb.undoBtn} title="Undo Last Stroke">↩ Undo</button>
-                <button onClick={() => handleRedo(current)} style={tb.undoBtn} title="Redo">↪ Redo</button>
+                <div style={tb.card}>
+                  <span style={tb.label}>Ink</span>
+                  {penColors.map(({ c, n }) => (
+                    <button key={c} title={n} onClick={() => setPenColor(c)} style={tb.dot(penColor === c, c)} />
+                  ))}
+                </div>
 
-                {drawTool !== 'eraser' && (
-                  <>
-                    <div style={tb.card}>
-                      <span style={tb.label}>Ink</span>
-                      {penColors.map(({ c, n }) => (
-                        <button key={c} title={n} onClick={() => setPenColor(c)} style={tb.dot(penColor === c, c)} />
-                      ))}
-                    </div>
-
-                    <div style={{ ...tb.card, gap: "10px", minWidth: "150px" }}>
-                      <span style={tb.label}>Size</span>
-                      <input type="range" min="1" max="20" value={penWidth}
-                        onChange={(e) => setPenWidth(Number(e.target.value))}
-                        style={{ flex: 1, accentColor: "#7c6fff", cursor: "pointer" }} />
-                      <span style={{ color: "#aaa", fontSize: "0.78rem", minWidth: "20px" }}>{penWidth}</span>
-                    </div>
-                  </>
-                )}
+                <div style={{ ...tb.card, gap: "10px", minWidth: "150px" }}>
+                  <span style={tb.label}>Size</span>
+                  <input type="range" min="1" max="20" value={penWidth}
+                    onChange={(e) => setPenWidth(Number(e.target.value))}
+                    style={{ flex: 1, accentColor: "#7c6fff", cursor: "pointer" }} />
+                  <span style={{ color: "#aaa", fontSize: "0.78rem", minWidth: "20px" }}>{penWidth}</span>
+                </div>
               </>
             )}
 
             {!isSubmitted && hasEditsOnPage && (
               <button onClick={() => clearPage(current)}
                 style={{ ...tb.pill(false, '#ff4757', '#c0392b'), marginLeft: "auto", color: "#ffbaba", background: "rgba(255,71,87,0.15)", border: "1px solid rgba(255,71,87,0.4)" }}>
-                🧽 Erase Page
+                Erase Full Page
               </button>
             )}
           </div>
         );
       })()}
 
-      {/* Main Content Area with Sidebar */}
       <div style={{ display: "flex", gap: "25px", alignItems: "flex-start", marginTop: "20px", justifyContent: "center" }}>
-
-        {/* Quiz Area - Added Fixed Max Width and Enforced Width */}
         <div style={{ width: "750px", maxWidth: "100%", flexShrink: 0, background: "white", minHeight: "400px", borderRadius: "12px", boxShadow: "0 2px 10px rgba(0,0,0,0.05)", border: "1px solid #eee", padding: "0", position: "relative", overflow: "visible" }}>
           {questions.map((q, index) => {
             const showAll = isSubmitted && !isRetakeMode;
@@ -877,13 +1035,12 @@ function Quiz() {
                   userSelect: isDrawingMode ? "none" : "auto",
                   WebkitUserSelect: isDrawingMode ? "none" : "auto",
                   WebkitTouchCallout: "none",
-                  textAlign: "left", // Force Left Alignment for entire block
+                  textAlign: "left",
                   cursor: isDrawingMode
                     ? ((isRetakeMode ? retakeSubmitted : (isSubmitted || showExp[index])) ? getCustomCursor() : 'default')
                     : 'default'
                 }}
               >
-                {/* Formatting left-aligned "1. Question text..." */}
                 <div style={{
                   display: "flex", alignItems: "flex-start", gap: "8px", marginBottom: "20px",
                   pointerEvents: isDrawingMode ? "none" : "auto", userSelect: isDrawingMode ? "none" : "auto"
@@ -937,7 +1094,7 @@ function Quiz() {
                       data-q-index={index}
                       data-opt-index={i}
                       style={{
-                        display: "block", margin: "10px 0", padding: "12px 15px", width: "100%", // spread across width
+                        display: "block", margin: "10px 0", padding: "12px 15px", width: "100%",
                         textAlign: "left", border: "1px solid #ccc", borderRadius: "6px", background: bg, color: color, opacity: opacity,
                         cursor: isDisabled ? "default" : "pointer", position: "relative", zIndex: isDrawingMode ? 1 : 110,
                         pointerEvents: isDrawingMode ? "none" : "auto", fontSize: "1rem"
@@ -997,7 +1154,6 @@ function Quiz() {
           })}
         </div>
 
-        {/* Sidebar Question Palette - Updated for 3 Columns */}
         <div style={{
           width: "180px", flexShrink: 0, position: "sticky", top: "20px", background: "#fff",
           borderRadius: "14px", border: "1px solid #eee", padding: "15px",
@@ -1044,7 +1200,7 @@ function Quiz() {
       </div>
 
       {(!isSubmitted || isRetakeMode) && (
-        <div style={{ margin: "20px auto 0", width: "100%", display: "flex", gap: "10px", flexWrap: "wrap", justifyContent: "center", maxWidth: "955px" /* 750 + 180 + 25 gap */ }}>
+        <div style={{ margin: "20px auto 0", width: "100%", display: "flex", gap: "10px", flexWrap: "wrap", justifyContent: "center", maxWidth: "955px" }}>
           <button onClick={prevQuestion} disabled={current === 0} style={btnBase}>Previous</button>
           <button onClick={nextQuestion} disabled={current === questions.length - 1} style={btnBase}>Next</button>
 
@@ -1053,7 +1209,7 @@ function Quiz() {
               onClick={() => {
                 if (isRetakeMode) {
                   setRetakeSubmitted(true);
-                  syncToCloud({ retakeAnswers, retakeSubmitted: true, current: current });
+                  syncToCloud({ retakeAnswers, retakeSubmitted: true, current: current }, true);
                 } else {
                   submitQuiz();
                 }
@@ -1111,7 +1267,7 @@ function Quiz() {
                 setRetakeAnswers({});
                 setRetakeSubmitted(false);
                 setCurrent(0);
-                syncToCloud(resetState);
+                syncToCloud(resetState, true);
               }}
               style={{ ...btnBase, background: "#ff9800", color: "white", fontSize: "1.1rem", padding: "12px 24px", position: "relative", zIndex: 200, pointerEvents: "auto" }}
             >
@@ -1120,12 +1276,10 @@ function Quiz() {
             <button onClick={clearAnnotations} style={{ ...btnBase, background: "#f44336", color: "white", fontSize: "1.1rem", padding: "12px 24px", position: "relative", zIndex: 200, pointerEvents: "auto" }}>
               Clear Notes 🗑️
             </button>
-
           </div>
         </div>
       )}
 
-      {/* HIDDEN PDF DATA CONTAINER */}
       <div id="pdf-container" style={{ position: "absolute", left: "-9999px", top: "-9999px", width: "794px", padding: "40px", background: "white", color: "black", fontFamily: "Arial", boxSizing: "border-box" }}>
         <h2>{subjName} - {chapterName} (Review)</h2>
         <hr />
