@@ -35,7 +35,7 @@ function Quiz() {
   const [isDrawingMode, setIsDrawingMode] = useState(false);
   const [isHighlightMode, setIsHighlightMode] = useState(false);
   const [drawTool, setDrawTool] = useState('pen');
-  const [penColor, setPenColor] = useState('#FF003C');
+  const [penColor, setPenColor] = useState('#FF003C'); // Default to bright red
   const [highlightColor, setHighlightColor] = useState('#FFF800');
   const [penWidth, setPenWidth] = useState(2);
 
@@ -49,14 +49,15 @@ function Quiz() {
   const activeCanvasIndex = useRef(null);
   const isDrawing = useRef(false);
 
-  // Snapshots for shapes & continuous redrawing
+  // Snapshots for shapes
   const startX = useRef(0);
   const startY = useRef(0);
-  const preStrokeSnapshot = useRef(null);
+  const snapshot = useRef(null);
 
-  // Auto-Snap & Spline Feature Refs
+  // Auto-Snap Feature Refs
   const strokePoints = useRef([]);
   const holdTimeout = useRef(null);
+  const preStrokeSnapshot = useRef(null);
   const lastPos = useRef({ x: 0, y: 0 });
   const isSnapped = useRef(false);
   const isHighlightErased = useRef(false);
@@ -86,7 +87,10 @@ function Quiz() {
         if (data.selectedAnswers !== undefined) setSelectedAnswers(data.selectedAnswers);
         if (data.showExp !== undefined) setShowExp(data.showExp);
         if (data.current !== undefined) setCurrent(data.current);
-        if (data.isSubmitted !== undefined) setIsSubmitted(data.isSubmitted);
+
+        if (data.isSubmitted !== undefined) {
+          setIsSubmitted(data.isSubmitted);
+        }
       } else if (!docSnap.exists()) {
         setCurrent(0);
         setDrawings({});
@@ -94,8 +98,14 @@ function Quiz() {
         setSelectedAnswers({});
         setShowExp({});
         setIsSubmitted(false);
+
         setDoc(docRef, {
-          current: 0, drawings: {}, savedExplanations: {}, selectedAnswers: {}, showExp: {}, isSubmitted: false
+          current: 0,
+          drawings: {},
+          savedExplanations: {},
+          selectedAnswers: {},
+          showExp: {},
+          isSubmitted: false
         }).catch(err => console.error("Error creating initial document:", err));
       }
       setIsInitialLoadComplete(true);
@@ -128,6 +138,7 @@ function Quiz() {
       }
       return;
     }
+
     const docRef = doc(db, 'users', user.uid, 'quizzes', `${subjectName}-${chapterId}`);
     setIsSaving(true);
 
@@ -161,7 +172,7 @@ function Quiz() {
       const container = questionContainersRef.current[index];
 
       if (canvas && container) {
-        // High DPI (iPad retina display) coordinate scaling
+        // NEW: Get screen DPI for crisp HD lines
         const ratio = window.devicePixelRatio || 1;
         const targetWidth = container.offsetWidth * ratio;
         const targetHeight = container.offsetHeight * ratio;
@@ -176,13 +187,10 @@ function Quiz() {
             canvas.style.height = `${container.offsetHeight}px`;
           }
 
-          // iPad Optimization: desynchronized context reduces pen latency massively
-          const ctx = canvas.getContext('2d', { desynchronized: true });
+          const ctx = canvas.getContext('2d');
 
           if (needsResize) {
             ctx.scale(ratio, ratio);
-            ctx.imageSmoothingEnabled = true;
-            ctx.imageSmoothingQuality = 'high';
           }
 
           ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -191,6 +199,7 @@ function Quiz() {
             const img = new Image();
             img.src = drawings[index];
             img.onload = () => {
+              // Draw image using CSS container size, the context scale will HD it perfectly
               ctx.drawImage(img, 0, 0, container.offsetWidth, container.offsetHeight);
             };
             canvas.dataset.loaded = drawings[index];
@@ -202,6 +211,7 @@ function Quiz() {
     });
   }, [current, isDrawingMode, quizData, isSubmitted, isInitialLoadComplete, drawings, showExp]);
 
+  // --- Core Navigation ---
   const handleQuestionChange = (newIndex) => {
     setCurrent(newIndex);
     if (!isRetakeMode) syncToCloud({ current: newIndex });
@@ -236,7 +246,9 @@ function Quiz() {
       });
       return;
     }
+
     if (isSubmitted || isDrawingMode || showExp[qIdx]) return;
+
     setSelectedAnswers(prevAnswers => {
       const newSelectedAnswers = { ...prevAnswers, [qIdx]: optIdx };
       syncToCloud({ selectedAnswers: newSelectedAnswers, current: current });
@@ -273,7 +285,7 @@ function Quiz() {
     ctx.globalAlpha = 1.0;
     ctx.strokeStyle = penColor;
     ctx.lineWidth = penWidth;
-    ctx.shadowBlur = 0.5;
+    ctx.shadowBlur = 1; // Smooth shadow for shapes
     ctx.shadowColor = penColor;
 
     const isClosedShape = gap < diag * 0.3;
@@ -297,7 +309,7 @@ function Quiz() {
     isSnapped.current = true;
   };
 
-  // --- NEW IPAD DRAWING ENGINE ---
+  // --- Canvas Drawing Logic ---
   const startDrawing = (e, index) => {
     const { nativeEvent } = e;
     if (!isDrawingMode) return;
@@ -321,142 +333,128 @@ function Quiz() {
     const offsetX = clientX - rect.left;
     const offsetY = clientY - rect.top;
 
-    const ctx = canvas.getContext('2d', { desynchronized: true });
+    const ctx = canvas.getContext('2d');
 
     isDrawing.current = true;
     isSnapped.current = false;
     startX.current = offsetX;
     startY.current = offsetY;
 
-    // Take a snapshot of the canvas BEFORE the stroke
     const state = ctx.getImageData(0, 0, canvas.width, canvas.height);
     preStrokeSnapshot.current = state;
+    snapshot.current = state;
 
     if (!undoHistoryRefs.current[index]) undoHistoryRefs.current[index] = [];
     undoHistoryRefs.current[index].push(state);
     if (undoHistoryRefs.current[index].length > 20) undoHistoryRefs.current[index].shift();
 
     redoHistoryRefs.current[index] = [];
-
-    // Start tracking the spline coordinates
     strokePoints.current = [{ x: offsetX, y: offsetY }];
+
+    ctx.beginPath();
+    ctx.moveTo(offsetX, offsetY);
   };
 
   const draw = (e, index) => {
     const { nativeEvent } = e;
     if (!isDrawing.current || !isDrawingMode || activeCanvasIndex.current !== index) return;
     const canvas = canvasRefs.current[index];
-    const ctx = canvas?.getContext('2d', { desynchronized: true });
+    const ctx = canvas?.getContext('2d');
     if (!ctx || !isDrawing.current) return;
 
     const rect = canvas.getBoundingClientRect();
-
-    // iPad touch digitisers process events faster than 60Hz. Capture them ALL.
-    const eventsToProcess = nativeEvent.getCoalescedEvents ? nativeEvent.getCoalescedEvents() : [nativeEvent];
-
-    if (drawTool === 'pen' || drawTool === 'canvas-highlighter' || drawTool === 'eraser') {
-      eventsToProcess.forEach(ev => {
-        strokePoints.current.push({ x: ev.clientX - rect.left, y: ev.clientY - rect.top });
-      });
-    } else {
-      // Shapes only care about latest position
-      strokePoints.current = [
-        { x: startX.current, y: startY.current },
-        { x: nativeEvent.clientX - rect.left, y: nativeEvent.clientY - rect.top }
-      ];
-    }
-
-    if (isSnapped.current && drawTool === 'pen') return;
-
-    // Step 1: Blank the slate back to before the stroke started
-    ctx.putImageData(preStrokeSnapshot.current, 0, 0);
-
-    const pts = strokePoints.current;
-    const latestOffsetX = pts[pts.length - 1].x;
-    const latestOffsetY = pts[pts.length - 1].y;
-
-    // Step 2: Configure buttery smooth tools
-    ctx.beginPath();
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.shadowBlur = 0; // Reset
+    const offsetX = nativeEvent.clientX - rect.left;
+    const offsetY = nativeEvent.clientY - rect.top;
 
     if (drawTool === 'eraser') {
       ctx.globalCompositeOperation = 'destination-out';
-      ctx.lineWidth = 30;
-      ctx.globalAlpha = 1.0;
+      ctx.lineWidth = 25;
+      ctx.shadowBlur = 0; // Turn off shadow for eraser
+      ctx.lineTo(offsetX, offsetY);
+      ctx.stroke();
 
-      // Handle underlying DOM text highlighting erasure
-      eventsToProcess.forEach(ev => {
-        const elementsUnderCursor = document.elementsFromPoint(ev.clientX, ev.clientY);
-        const highlightedSpan = elementsUnderCursor.find(el => el.tagName === 'SPAN' && el.style.backgroundColor);
-        if (highlightedSpan) {
-          const expRef = explanationRefs.current[index];
-          if (expRef && expRef.contains(highlightedSpan)) {
-            const parent = highlightedSpan.parentNode;
-            while (highlightedSpan.firstChild) {
-              parent.insertBefore(highlightedSpan.firstChild, highlightedSpan);
-            }
-            parent.removeChild(highlightedSpan);
-            isHighlightErased.current = true;
+      const elementsUnderCursor = document.elementsFromPoint(nativeEvent.clientX, nativeEvent.clientY);
+      const highlightedSpan = elementsUnderCursor.find(el => el.tagName === 'SPAN' && el.style.backgroundColor);
+      if (highlightedSpan) {
+        const expRef = explanationRefs.current[index];
+        if (expRef && expRef.contains(highlightedSpan)) {
+          const parent = highlightedSpan.parentNode;
+          while (highlightedSpan.firstChild) {
+            parent.insertBefore(highlightedSpan.firstChild, highlightedSpan);
           }
+          parent.removeChild(highlightedSpan);
+          isHighlightErased.current = true;
         }
-      });
+      }
 
     } else if (drawTool === 'canvas-highlighter') {
-      // Realistic marker bleeding effect using Multiply
-      ctx.globalCompositeOperation = 'multiply';
-      ctx.globalAlpha = 0.5;
-      ctx.strokeStyle = highlightColor; // Corrected from penColor
-      ctx.lineWidth = Math.max(15, penWidth * 4);
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = 0.4;
+      ctx.strokeStyle = penColor;
+      ctx.shadowBlur = 0; // Clear shadow
+      ctx.lineWidth = Math.max(15, penWidth * 3);
+      ctx.lineTo(offsetX, offsetY);
+      ctx.stroke();
+
     } else if (drawTool === 'pen') {
+      if (isSnapped.current) return;
+
       ctx.globalCompositeOperation = 'source-over';
       ctx.globalAlpha = 1.0;
       ctx.strokeStyle = penColor;
       ctx.lineWidth = penWidth;
-      ctx.shadowBlur = 0.5; // Acts as super-sampling anti-aliasing
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+
+      // NEW: Micro-shadow acts as anti-aliasing for buttery smooth lines
+      ctx.shadowBlur = 0.5;
       ctx.shadowColor = penColor;
-    } else {
-      ctx.globalCompositeOperation = 'source-over';
-      ctx.globalAlpha = 1.0;
-      ctx.strokeStyle = penColor;
-      ctx.lineWidth = penWidth;
-    }
 
-    // Step 3: Draw a perfect continuous Catmull-Rom/Quadratic spline
-    if (drawTool === 'line') {
-      ctx.moveTo(startX.current, startY.current);
-      ctx.lineTo(latestOffsetX, latestOffsetY);
-    } else if (drawTool === 'rectangle') {
-      ctx.rect(startX.current, startY.current, latestOffsetX - startX.current, latestOffsetY - startY.current);
-    } else if (drawTool === 'circle') {
-      const radius = Math.hypot(latestOffsetX - startX.current, latestOffsetY - startY.current);
-      ctx.arc(startX.current, startY.current, radius, 0, 2 * Math.PI);
-    } else {
-      // Smooth path for freehand tools
-      if (pts.length < 3) {
-        ctx.moveTo(pts[0].x, pts[0].y);
-        ctx.lineTo(pts[pts.length - 1].x, pts[pts.length - 1].y);
+      strokePoints.current.push({ x: offsetX, y: offsetY });
+      const pts = strokePoints.current;
+
+      if (pts.length >= 3) {
+        const prev = pts[pts.length - 3];
+        const mid1 = { x: (prev.x + pts[pts.length - 2].x) / 2, y: (prev.y + pts[pts.length - 2].y) / 2 };
+        const mid2 = { x: (pts[pts.length - 2].x + offsetX) / 2, y: (pts[pts.length - 2].y + offsetY) / 2 };
+        ctx.beginPath();
+        ctx.moveTo(mid1.x, mid1.y);
+        ctx.quadraticCurveTo(pts[pts.length - 2].x, pts[pts.length - 2].y, mid2.x, mid2.y);
+        ctx.stroke();
       } else {
+        ctx.beginPath();
         ctx.moveTo(pts[0].x, pts[0].y);
-        for (let i = 1; i < pts.length - 1; i++) {
-          const midX = (pts[i].x + pts[i + 1].x) / 2;
-          const midY = (pts[i].y + pts[i + 1].y) / 2;
-          ctx.quadraticCurveTo(pts[i].x, pts[i].y, midX, midY);
-        }
-        ctx.lineTo(pts[pts.length - 1].x, pts[pts.length - 1].y);
+        ctx.lineTo(offsetX, offsetY);
+        ctx.stroke();
       }
-    }
 
-    // Draw it ALL at once perfectly smoothly
-    ctx.stroke();
-
-    // Auto-snap trigger for pen
-    if (drawTool === 'pen') {
       clearTimeout(holdTimeout.current);
       holdTimeout.current = setTimeout(() => {
         if (isDrawing.current && !isSnapped.current) snapShape();
       }, 600);
+
+    } else {
+      ctx.putImageData(snapshot.current, 0, 0);
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = 1.0;
+      ctx.strokeStyle = penColor;
+      ctx.lineWidth = penWidth;
+      ctx.shadowBlur = 1;
+      ctx.shadowColor = penColor;
+      ctx.beginPath();
+
+      if (drawTool === 'line') {
+        ctx.moveTo(startX.current, startY.current);
+        ctx.lineTo(offsetX, offsetY);
+      } else if (drawTool === 'rectangle') {
+        const width = offsetX - startX.current;
+        const height = offsetY - startY.current;
+        ctx.rect(startX.current, startY.current, width, height);
+      } else if (drawTool === 'circle') {
+        const radius = Math.sqrt(Math.pow(offsetX - startX.current, 2) + Math.pow(offsetY - startY.current, 2));
+        ctx.arc(startX.current, startY.current, radius, 0, 2 * Math.PI);
+      }
+      ctx.stroke();
     }
   };
 
@@ -465,7 +463,7 @@ function Quiz() {
     clearTimeout(holdTimeout.current);
 
     if (isDrawing.current && clientX !== undefined && clientY !== undefined) {
-      const dist = Math.hypot(clientX - lastPos.current.x, clientY - lastPos.current.y);
+      const dist = Math.sqrt(Math.pow(clientX - lastPos.current.x, 2) + Math.pow(clientY - lastPos.current.y, 2));
       if (dist < 5) {
         const elements = document.elementsFromPoint(clientX, clientY);
         const targetBtn = elements.find(el => el.tagName === 'BUTTON' || el.getAttribute('data-tap-btn') === 'true');
@@ -485,6 +483,7 @@ function Quiz() {
     const canvas = canvasRefs.current[index];
     const ctx = canvas?.getContext('2d');
     if (ctx) ctx.closePath();
+    isDrawing.current = false;
 
     if (canvas) {
       const newDrawUrl = canvas.toDataURL();
@@ -555,6 +554,7 @@ function Quiz() {
     canvas.dataset.loaded = newDrawUrl;
   };
 
+  // --- Clearing Logic ---
   const clearPage = (index) => {
     const canvas = canvasRefs.current[index];
     if (canvas) {
@@ -570,6 +570,7 @@ function Quiz() {
     setDrawings(prev => {
       const newDrawings = { ...prev };
       delete newDrawings[index];
+
       setSavedExplanations(prevExp => {
         const newExplanations = { ...prevExp };
         delete newExplanations[index];
@@ -590,7 +591,12 @@ function Quiz() {
       setIsDrawingMode(false);
       setIsHighlightMode(false);
 
-      syncToCloud({ isSubmitted: false, selectedAnswers: {}, showExp: {}, current: 0 });
+      syncToCloud({
+        isSubmitted: false,
+        selectedAnswers: {},
+        showExp: {},
+        current: 0
+      });
     }
   };
 
@@ -680,6 +686,14 @@ function Quiz() {
 
   const hasEditsOnPage = drawings[current] || savedExplanations[current];
 
+  const calculateScore = () => {
+    let score = 0;
+    questions.forEach((q, index) => {
+      if (selectedAnswers[index] === q.correct) score++;
+    });
+    return score;
+  };
+
   // --- PDF Logic ---
   const downloadPDF = async () => {
     const element = document.getElementById("pdf-container");
@@ -710,6 +724,7 @@ function Quiz() {
     pdf.save(`${subjName}-${chapterName}-Notes.pdf`);
   };
 
+  // UI Styles
   const btnBase = { padding: "8px 16px", border: "none", borderRadius: "4px", cursor: "pointer", fontWeight: "bold" };
 
   return (
@@ -722,6 +737,7 @@ function Quiz() {
         </div>
       </div>
 
+      {/* Cloud Saving Indicator */}
       {isSaving && (
         <div style={{
           position: "fixed", top: "20px", right: "20px", zIndex: 10000,
@@ -796,6 +812,7 @@ function Quiz() {
           }
         };
 
+        // NEW: Bright, highly saturated "Neon" colors
         const penColors = [
           { c: '#FF003C', n: 'Neon Red' },
           { c: '#00D0FF', n: 'Cyan Blue' },
