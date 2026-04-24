@@ -42,6 +42,7 @@ function Quiz() {
   const [drawings, setDrawings] = useState({});
   const [historyState, setHistoryState] = useState({});
 
+  const activePointers = useRef(new Set()); // Tracks multi-touch for zoom cancellation
   const canvasRefs = useRef({});
   const undoHistoryRefs = useRef({});
   const redoHistoryRefs = useRef({});
@@ -135,7 +136,6 @@ function Quiz() {
 
     return () => {
       window.removeEventListener("beforeunload", handleBeforeUnload);
-      // Force sync any remaining data on component unmount
       if (user && Object.keys(pendingUpdatesRef.current).length > 0) {
         const docRef = doc(db, 'users', user.uid, 'quizzes', `${subjectName}-${chapterId}`);
         updateDoc(docRef, pendingUpdatesRef.current).catch(() => { });
@@ -153,7 +153,6 @@ function Quiz() {
       return;
     }
 
-    // Merge new updates into the queue
     pendingUpdatesRef.current = { ...pendingUpdatesRef.current, ...updates };
     setIsSaving(true);
 
@@ -164,7 +163,6 @@ function Quiz() {
         return;
       }
 
-      // Clear queue instantly so new edits queue up properly
       pendingUpdatesRef.current = {};
       const docRef = doc(db, 'users', user.uid, 'quizzes', `${subjectName}-${chapterId}`);
 
@@ -181,7 +179,6 @@ function Quiz() {
           console.error("Error syncing progress:", error);
         }
       } finally {
-        // Only hide saving UI if no new edits sneaked into the queue during upload
         if (Object.keys(pendingUpdatesRef.current).length === 0) {
           setIsSaving(false);
         }
@@ -239,7 +236,6 @@ function Quiz() {
     });
   }, [current, isDrawingMode, quizData, isSubmitted, isInitialLoadComplete, drawings, showExp]);
 
-  // Turn off drawing modes and sync immediately when navigating questions
   const handleQuestionChange = (newIndex) => {
     setCurrent(newIndex);
     setIsDrawingMode(false);
@@ -518,10 +514,10 @@ function Quiz() {
     if (ctx) ctx.closePath();
 
     if (canvas) {
-      const newDrawUrl = canvas.toDataURL(); // Generate Base64
+      const newDrawUrl = canvas.toDataURL();
       setDrawings(prev => {
         const newDrawings = { ...prev, [index]: newDrawUrl };
-        if (!isHighlightErased.current) syncToCloud({ drawings: newDrawings }); // Debounced Call
+        if (!isHighlightErased.current) syncToCloud({ drawings: newDrawings });
         return newDrawings;
       });
       canvas.dataset.loaded = newDrawUrl;
@@ -533,7 +529,7 @@ function Quiz() {
         setSavedExplanations(prev => {
           const newExplanations = { ...prev, [index]: expRef.innerHTML };
           setDrawings(prevDrawings => {
-            syncToCloud({ drawings: prevDrawings, savedExplanations: newExplanations }); // Debounced Call
+            syncToCloud({ drawings: prevDrawings, savedExplanations: newExplanations });
             return prevDrawings;
           });
           return newExplanations;
@@ -541,6 +537,32 @@ function Quiz() {
       }
       isHighlightErased.current = false;
     }
+    activeCanvasIndex.current = null;
+  };
+
+  // --- ABORT GHOST STROKES ON MULTI-TOUCH ZOOM ---
+  const abortDrawing = (index) => {
+    if (!isDrawing.current || activeCanvasIndex.current !== index) return;
+    clearTimeout(holdTimeout.current);
+    isDrawing.current = false;
+
+    const canvas = canvasRefs.current[index];
+    const ctx = canvas?.getContext('2d');
+
+    if (ctx && preStrokeSnapshot.current) {
+      ctx.putImageData(preStrokeSnapshot.current, 0, 0); // Revert canvas instantly
+    }
+
+    const expRef = explanationRefs.current[index];
+    if (expRef && undoHistoryRefs.current[index] && undoHistoryRefs.current[index].length > 0) {
+      const lastState = undoHistoryRefs.current[index][undoHistoryRefs.current[index].length - 1];
+      if (lastState && lastState.html !== undefined) {
+        expRef.innerHTML = lastState.html;
+      }
+      undoHistoryRefs.current[index].pop(); // Pop the aborted stroke from local history
+    }
+
+    updateHistoryState(index);
     activeCanvasIndex.current = null;
   };
 
@@ -744,7 +766,7 @@ function Quiz() {
 
       setSavedExplanations(prev => {
         const newExplanations = { ...prev, [index]: expRef.innerHTML };
-        syncToCloud({ savedExplanations: newExplanations }); // Debounced
+        syncToCloud({ savedExplanations: newExplanations });
         return newExplanations;
       });
     } catch (err) {
@@ -771,7 +793,7 @@ function Quiz() {
     setSavedExplanations(prev => {
       const newExplanations = { ...prev };
       delete newExplanations[index];
-      syncToCloud({ savedExplanations: newExplanations }, true); // Force immediate flush on manual clear
+      syncToCloud({ savedExplanations: newExplanations }, true);
       return newExplanations;
     });
 
@@ -1014,24 +1036,43 @@ function Quiz() {
                 key={index}
                 ref={el => questionContainersRef.current[index] = el}
                 onPointerDown={(e) => {
+                  activePointers.current.add(e.pointerId);
+
+                  if (activePointers.current.size > 1) {
+                    abortDrawing(index);
+                    return;
+                  }
+
                   if (isDrawingMode && e.target.tagName !== 'INPUT' && e.target.tagName !== 'SELECT') {
                     e.currentTarget.setPointerCapture(e.pointerId);
                     startDrawing(e, index);
                   }
                 }}
-                onPointerMove={(e) => { if (isDrawing.current) draw(e, index); }}
+                onPointerMove={(e) => {
+                  if (activePointers.current.size > 1) {
+                    abortDrawing(index);
+                    return;
+                  }
+                  if (isDrawing.current) draw(e, index);
+                }}
                 onPointerUp={(e) => {
+                  activePointers.current.delete(e.pointerId);
                   if (isDrawing.current) {
                     e.currentTarget.releasePointerCapture(e.pointerId);
                     stopDrawing(index, e.clientX, e.clientY);
                   }
                 }}
-                onPointerOut={(e) => { if (isDrawing.current) stopDrawing(index); }}
-                onPointerCancel={(e) => { if (isDrawing.current) stopDrawing(index); }}
+                onPointerOut={(e) => {
+                  if (isDrawing.current && activePointers.current.size <= 1) stopDrawing(index);
+                }}
+                onPointerCancel={(e) => {
+                  activePointers.current.delete(e.pointerId);
+                  abortDrawing(index);
+                }}
                 style={{
                   position: "relative", padding: "30px", paddingBottom: showAll ? "70px" : "30px", marginBottom: "0",
                   borderBottom: showAll && index < questions.length - 1 ? "2px dashed #eee" : "none",
-                  touchAction: isDrawingMode ? "none" : "auto",
+                  touchAction: isDrawingMode ? "pinch-zoom" : "auto",
                   userSelect: isDrawingMode ? "none" : "auto",
                   WebkitUserSelect: isDrawingMode ? "none" : "auto",
                   WebkitTouchCallout: "none",
