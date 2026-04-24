@@ -401,7 +401,7 @@ function Quiz() {
       if (dist < 1.5) return;
 
       // 2. Exponential Moving Average (EMA) for butter-smooth lines
-      const tension = 0.65;
+      const tension = 0.85;
       const smoothX = smoothingPos.current.x + (rawX - smoothingPos.current.x) * tension;
       const smoothY = smoothingPos.current.y + (rawY - smoothingPos.current.y) * tension;
 
