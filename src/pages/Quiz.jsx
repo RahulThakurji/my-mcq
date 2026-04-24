@@ -998,7 +998,8 @@ function Quiz() {
                       position: "absolute", top: 0, left: 0, zIndex: 9999,
                       opacity: 1,
                       pointerEvents: "none",
-                      touchAction: "none"
+                      touchAction: "none",
+                      display: (isSubmitted || showExp[index]) ? "block" : "none"
                     }}
                   />
                 )}
