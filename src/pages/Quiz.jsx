@@ -78,8 +78,8 @@ function Quiz() {
     }
 
     const docRef = doc(db, 'users', user.uid, 'quizzes', `${subjectName}-${chapterId}`);
-    const unsubscribe = onSnapshot(docRef, (docSnap) => {
-      if (docSnap.exists()) {
+    const unsubscribe = onSnapshot(docRef, { includeMetadataChanges: true }, (docSnap) => {
+      if (docSnap.exists() && !docSnap.metadata.hasPendingWrites) {
         const data = docSnap.data();
         if (data.drawings !== undefined) setDrawings(data.drawings);
         if (data.savedExplanations !== undefined) setSavedExplanations(data.savedExplanations);
@@ -91,7 +91,7 @@ function Quiz() {
         if (data.isSubmitted !== undefined) {
           setIsSubmitted(data.isSubmitted);
         }
-      } else {
+      } else if (!docSnap.exists()) {
         // No document exists: Hydrate state with defaults and create initial document
         setCurrent(0);
         setDrawings({});
@@ -185,6 +185,11 @@ function Quiz() {
     if (!isRetakeMode) syncToCloud({ current: newIndex });
   };
 
+  const handleShowExplanation = (index) => {
+    setShowExp(prev => ({ ...prev, [index]: true }));
+    syncToCloud({ showExp: { ...showExp, [index]: true }, current: current });
+  };
+
   const nextQuestion = () => { if (current < questions.length - 1) handleQuestionChange(current + 1); };
   const prevQuestion = () => { if (current > 0) handleQuestionChange(current - 1); };
 
@@ -215,7 +220,7 @@ function Quiz() {
 
     setSelectedAnswers(prevAnswers => {
       const newSelectedAnswers = { ...prevAnswers, [qIdx]: optIdx };
-      syncToCloud({ selectedAnswers: newSelectedAnswers });
+      syncToCloud({ selectedAnswers: newSelectedAnswers, current: current });
       return newSelectedAnswers;
     });
   };
