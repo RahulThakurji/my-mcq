@@ -939,7 +939,7 @@ function Quiz() {
                       opacity: opacity,
                       cursor: isDisabled ? "default" : "pointer",
                       position: "relative",
-                      zIndex: isDrawingMode ? 10 : 110,
+                      zIndex: isDrawingMode ? 1 : 110,
                       pointerEvents: isDrawingMode ? "none" : "auto"
                     }}
                   >
@@ -995,7 +995,7 @@ function Quiz() {
                   <canvas
                     ref={el => canvasRefs.current[index] = el}
                     style={{
-                      position: "absolute", top: 0, left: 0, zIndex: 100,
+                      position: "absolute", top: 0, left: 0, zIndex: 9999,
                       opacity: 1,
                       pointerEvents: "none",
                       touchAction: "none"
