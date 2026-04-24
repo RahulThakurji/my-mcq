@@ -1100,7 +1100,17 @@ function Quiz() {
             <button onClick={downloadPDF} style={{ ...btnBase, background: "#2196f3", color: "white", fontSize: "1.1rem", padding: "12px 24px", position: "relative", zIndex: 200, pointerEvents: "auto" }}>
               Download Study Notes (PDF) 📥
             </button>
-            <button onClick={() => { setIsRetakeMode(true); setRetakeAnswers({}); setRetakeSubmitted(false); setCurrent(0); }} style={{ ...btnBase, background: "#ff9800", color: "white", fontSize: "1.1rem", padding: "12px 24px", position: "relative", zIndex: 200, pointerEvents: "auto" }}>
+            <button 
+              onClick={() => { 
+                const resetState = { current: 0, retakeAnswers: {}, retakeSubmitted: false };
+                setIsRetakeMode(true); 
+                setRetakeAnswers({}); 
+                setRetakeSubmitted(false); 
+                setCurrent(0); 
+                syncToCloud(resetState);
+              }} 
+              style={{ ...btnBase, background: "#ff9800", color: "white", fontSize: "1.1rem", padding: "12px 24px", position: "relative", zIndex: 200, pointerEvents: "auto" }}
+            >
               Re-take Quiz 🔄
             </button>
             <button onClick={clearAnnotations} style={{ ...btnBase, background: "#f44336", color: "white", fontSize: "1.1rem", padding: "12px 24px", position: "relative", zIndex: 200, pointerEvents: "auto" }}>
