@@ -9,7 +9,7 @@
       question: "Which article declares India a 'Union of States'?",
       options: ["Article 1", "Article 3", "Article 5", "Article 12"],
       correct: 0,
-      explanation: "Article 1 of the Constitution declares that India, that is Bharat, shall be a Union of States."
+      explanation: "Article 1 of the Constitution declares that India, that is Bharat, shall be a Union of States.Article 1 of the Constitution declares that India, that is Bharat, shall be a Union of States."
     },
     {
       id: 2,
@@ -80,6 +80,13 @@
       options: ["Article 17", "Article 15", "Article 16", "Article 18"],
       correct: 0,
       explanation: "Article 17 abolishes untouchability and forbids its practice in any form."
+    },
+    {
+      id: 12,
+      question: "Which article guarantees equality before law?",
+      options: ["Article 14", "Article 19", "Article 21", "Article 32"],
+      correct: 0,
+      explanation: "Article 14 guarantees equality before law and equal protection of laws."
     },
     {
       id: 12,
