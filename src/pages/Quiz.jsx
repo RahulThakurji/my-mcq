@@ -210,7 +210,7 @@ function Quiz() {
         } else {
           newAnswers = { ...prev, [qIdx]: optIdx };
         }
-        syncToCloud({ retakeAnswers: newAnswers });
+        // REMOVED syncToCloud here to prevent jumping during retake
         return newAnswers;
       });
       return;
@@ -1063,7 +1063,17 @@ function Quiz() {
           <button onClick={nextQuestion} disabled={current === questions.length - 1} style={btnBase}>Next</button>
 
           {current === questions.length - 1 && (!isRetakeMode || !retakeSubmitted) && (
-            <button onClick={() => isRetakeMode ? setRetakeSubmitted(true) : submitQuiz()} style={{ ...btnBase, background: "#ff9800", color: "white", marginLeft: "auto" }}>
+            <button 
+              onClick={() => {
+                if (isRetakeMode) {
+                  setRetakeSubmitted(true);
+                  syncToCloud({ retakeAnswers, retakeSubmitted: true, current: current });
+                } else {
+                  submitQuiz();
+                }
+              }} 
+              style={{ ...btnBase, background: "#ff9800", color: "white", marginLeft: "auto" }}
+            >
               Submit {isRetakeMode ? "Retake" : "Quiz"}
             </button>
           )}
