@@ -948,8 +948,8 @@ function Quiz() {
                 );
               })}
 
-                {/* Show Check Answer button for Initial Mode if selected but not revealed */}
-                {!isRetakeMode && !isSubmitted && selectedAnswers[index] !== undefined && !showExp[index] && (
+                {/* Show Check Answer button for both modes if selected but not revealed */}
+                {!isSubmitted && ((!isRetakeMode && selectedAnswers[index] !== undefined) || (isRetakeMode && retakeAnswers[index] !== undefined)) && !showExp[index] && (
                   <button 
                     onClick={() => handleShowExplanation(index)}
                     style={{
@@ -962,7 +962,7 @@ function Quiz() {
                   </button>
                 )}
 
-                {!isRetakeMode && (isSubmitted || showExp[index]) && q.explanation && (
+                {(isSubmitted || showExp[index]) && q.explanation && (
                   <div style={{ marginTop: "20px", position: "relative", zIndex: 10, pointerEvents: isDrawingMode ? "none" : "auto" }}>
 
                     {/* Original Explanation with Highlighter support */}
@@ -1127,6 +1127,20 @@ function Quiz() {
               style={{ ...btnBase, background: "#ff9800", color: "white", fontSize: "1.1rem", padding: "12px 24px", position: "relative", zIndex: 200, pointerEvents: "auto" }}
             >
               Test Yourself 🔄
+            </button>
+            <button 
+              onClick={() => { 
+                const resetState = { current: 0, retakeAnswers: {}, retakeSubmitted: false, showExp: {} };
+                setIsRetakeMode(true); 
+                setRetakeAnswers({}); 
+                setRetakeSubmitted(false); 
+                setShowExp({});
+                setCurrent(0); 
+                syncToCloud(resetState);
+              }} 
+              style={{ ...btnBase, background: "#4caf50", color: "white", fontSize: "1.1rem", padding: "12px 24px", position: "relative", zIndex: 200, pointerEvents: "auto" }}
+            >
+              Start again 🔄
             </button>
             <button onClick={clearAnnotations} style={{ ...btnBase, background: "#f44336", color: "white", fontSize: "1.1rem", padding: "12px 24px", position: "relative", zIndex: 200, pointerEvents: "auto" }}>
               Clear All (Fresh Start) 🗑️
