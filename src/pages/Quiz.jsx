@@ -289,8 +289,9 @@ function Quiz() {
     lastPos.current = { x: clientX, y: clientY };
     isDrawing.current = true; // Always mark as 'interacting' for tap detection
 
-    // Lock actual drawing logic behind explanation reveal
-    if (!isSubmitted && !showExp[index]) return;
+    // Lock actual drawing logic behind explanation reveal or submission
+    const isDrawingAllowed = isRetakeMode ? retakeSubmitted : (isSubmitted || showExp[index]);
+    if (!isDrawingAllowed) return;
 
     const canvas = canvasRefs.current[index];
     if (!canvas) return;
@@ -877,7 +878,7 @@ function Quiz() {
                   WebkitUserSelect: isDrawingMode ? "none" : "auto",
                   WebkitTouchCallout: "none",
                   cursor: isDrawingMode 
-                    ? ((isSubmitted || showExp[index]) 
+                    ? ((isRetakeMode ? retakeSubmitted : (isSubmitted || showExp[index])) 
                         ? (drawTool === 'eraser' ? 'cell' : 'crosshair') 
                         : 'not-allowed') 
                     : 'default'
