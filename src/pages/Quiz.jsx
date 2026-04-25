@@ -204,9 +204,6 @@ function Quiz() {
       const container = questionContainersRef.current[index];
 
       if (canvas && container) {
-        // --- SUPER-SAMPLING FOR PINCH ZOOM CLARITY ---
-        // By multiplying the device ratio by 2, we generate a massive internal 
-        // backing store for the canvas so it stays crisp when users zoom closely in.
         const superSampleMultiplier = 2;
         const ratio = (window.devicePixelRatio || 1) * superSampleMultiplier;
 
@@ -373,7 +370,6 @@ function Quiz() {
     startX.current = offsetX;
     startY.current = offsetY;
 
-    // Enforce high quality drawing properties for new strokes
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
     ctx.lineCap = 'round';
@@ -392,7 +388,7 @@ function Quiz() {
 
     redoHistoryRefs.current[index] = [];
     strokePoints.current = [{ x: offsetX, y: offsetY }];
-    smoothingPos.current = { x: offsetX, y: offsetY }; // Initialize EMA smoothing origin
+    smoothingPos.current = { x: offsetX, y: offsetY };
     updateHistoryState(index);
 
     ctx.beginPath();
@@ -412,19 +408,19 @@ function Quiz() {
 
     // --- HIGH-FIDELITY HANDWRITING SMOOTHING LOGIC ---
     if (drawTool === 'pen' || drawTool === 'eraser') {
-      // 1. Anti-Jitter: Ignore microscopic sensor noise that makes lines look shaky
       const dist = Math.hypot(rawX - smoothingPos.current.x, rawY - smoothingPos.current.y);
-      if (dist < 1.0) return; // Tightened threshold for high precision
 
-      // 2. Exponential Moving Average (EMA) for buttery-smooth lines
-      const tension = 0.4; // Reduced to 0.4 so the ink organically trails the pen to smooth loops
+      // 1. Aggressive Anti-Jitter: Blocks the hardware's left/right micro-fluctuations
+      if (dist < 2.5) return;
+
+      // 2. Buttery EMA Smoothing: Lower tension pulls the ink more gently, ironing out wobbles
+      const tension = 0.25;
       const smoothX = smoothingPos.current.x + (rawX - smoothingPos.current.x) * tension;
       const smoothY = smoothingPos.current.y + (rawY - smoothingPos.current.y) * tension;
 
       smoothingPos.current = { x: smoothX, y: smoothY };
       strokePoints.current.push({ x: smoothX, y: smoothY });
     } else {
-      // Shape tools need exact raw coordinates
       strokePoints.current.push({ x: rawX, y: rawY });
     }
     // ---------------------------------------------------
@@ -489,7 +485,7 @@ function Quiz() {
       ctx.lineWidth = penWidth;
       ctx.lineJoin = 'round';
       ctx.lineCap = 'round';
-      ctx.shadowBlur = 0.5; // Gel-pen slight bleed effect
+      ctx.shadowBlur = 0.5;
       ctx.shadowColor = penColor;
       drawSmoothCurve();
 
@@ -576,7 +572,6 @@ function Quiz() {
     activeCanvasIndex.current = null;
   };
 
-  // --- ABORT GHOST STROKES ON MULTI-TOUCH ZOOM ---
   const abortDrawing = (index) => {
     if (!isDrawing.current || activeCanvasIndex.current !== index) return;
     clearTimeout(holdTimeout.current);
@@ -586,7 +581,7 @@ function Quiz() {
     const ctx = canvas?.getContext('2d');
 
     if (ctx && preStrokeSnapshot.current) {
-      ctx.putImageData(preStrokeSnapshot.current, 0, 0); // Revert canvas instantly
+      ctx.putImageData(preStrokeSnapshot.current, 0, 0);
     }
 
     const expRef = explanationRefs.current[index];
@@ -595,7 +590,7 @@ function Quiz() {
       if (lastState && lastState.html !== undefined) {
         expRef.innerHTML = lastState.html;
       }
-      undoHistoryRefs.current[index].pop(); // Pop the aborted stroke from local history
+      undoHistoryRefs.current[index].pop();
     }
 
     updateHistoryState(index);
@@ -717,7 +712,7 @@ function Quiz() {
       setSavedExplanations(prevExp => {
         const newExplanations = { ...prevExp };
         delete newExplanations[index];
-        syncToCloud({ drawings: newDrawings, savedExplanations: newExplanations }, true); // Force flush immediate
+        syncToCloud({ drawings: newDrawings, savedExplanations: newExplanations }, true);
         return newExplanations;
       });
       return newDrawings;
