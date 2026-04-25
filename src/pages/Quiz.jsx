@@ -39,7 +39,7 @@ function Quiz() {
   const [penColor, setPenColor] = useState('#FF003C');
   const [highlightColor, setHighlightColor] = useState('#FFF800');
   const [penWidth, setPenWidth] = useState(3);
-  const [activeMenu, setActiveMenu] = useState(null);
+  const [activeMenu, setActiveMenu] = useState(null); // Tracks open pop-up menus
 
   const [drawings, setDrawings] = useState({});
   const [historyState, setHistoryState] = useState({});
@@ -66,20 +66,16 @@ function Quiz() {
 
   const pendingUpdatesRef = useRef({});
 
-  // --- ZERO-LATENCY INCREMENTAL RENDER REFS ---
+  // Snapshots and Auto-Snap Refs
   const startX = useRef(0);
   const startY = useRef(0);
   const snapshot = useRef(null);
-  const preStrokeSnapshot = useRef(null);
+  const strokePoints = useRef([]);
   const holdTimeout = useRef(null);
+  const preStrokeSnapshot = useRef(null);
+  const lastPos = useRef({ x: 0, y: 0 });
   const isSnapped = useRef(false);
   const isHighlightErased = useRef(false);
-
-  const lastPt = useRef({ x: 0, y: 0 });
-  const lastMid = useRef({ x: 0, y: 0 });
-  const lastTime = useRef(0);
-  const currentLineWidth = useRef(penWidth);
-  const strokePoints = useRef([]);
 
   const updateHistoryState = (index) => {
     setHistoryState(prev => ({
@@ -168,6 +164,7 @@ function Quiz() {
     return () => unsubscribe();
   }, [user, subjectName, chapterId]);
 
+  // MANUAL SAVE & REFRESH WARNING
   useEffect(() => {
     const handleBeforeUnload = (e) => {
       if (hasUnsavedChanges) {
@@ -239,9 +236,7 @@ function Quiz() {
       const container = questionContainersRef.current[index];
 
       if (canvas && container) {
-        const superSampleMultiplier = 2;
-        const ratio = (window.devicePixelRatio || 1) * superSampleMultiplier;
-
+        const ratio = window.devicePixelRatio || 1;
         const targetWidth = container.offsetWidth * ratio;
         const targetHeight = container.offsetHeight * ratio;
 
@@ -255,11 +250,8 @@ function Quiz() {
             canvas.style.height = `${container.offsetHeight}px`;
           }
 
-          const ctx = canvas.getContext('2d', { desynchronized: true, willReadFrequently: true });
-          if (needsResize) {
-            ctx.scale(ratio, ratio);
-          }
-
+          const ctx = canvas.getContext('2d');
+          if (needsResize) ctx.scale(ratio, ratio);
           ctx.clearRect(0, 0, canvas.width, canvas.height);
 
           if (drawings[index]) {
@@ -342,16 +334,14 @@ function Quiz() {
 
     const canvas = canvasRefs.current[activeCanvasIndex.current];
     if (!canvas) return;
-
-    const ctx = canvas.getContext('2d', { desynchronized: true, willReadFrequently: true });
+    const ctx = canvas.getContext('2d');
     ctx.putImageData(preStrokeSnapshot.current, 0, 0);
     ctx.beginPath();
     ctx.globalAlpha = 1.0;
     ctx.strokeStyle = penColor;
     ctx.lineWidth = penWidth;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.shadowBlur = 0;
+    ctx.shadowBlur = 1;
+    ctx.shadowColor = penColor;
 
     const isClosedShape = gap < diag * 0.3;
 
@@ -396,22 +386,12 @@ function Quiz() {
     const rect = canvas.getBoundingClientRect();
     const offsetX = clientX - rect.left;
     const offsetY = clientY - rect.top;
+    lastPos.current = { x: clientX, y: clientY };
 
-    const ctx = canvas.getContext('2d', { desynchronized: true, willReadFrequently: true });
-
+    const ctx = canvas.getContext('2d');
     isSnapped.current = false;
     startX.current = offsetX;
     startY.current = offsetY;
-
-    lastPt.current = { x: offsetX, y: offsetY };
-    lastMid.current = { x: offsetX, y: offsetY };
-    lastTime.current = Date.now();
-    currentLineWidth.current = penWidth;
-    strokePoints.current = [{ x: offsetX, y: offsetY }];
-
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.imageSmoothingEnabled = true;
 
     const state = ctx.getImageData(0, 0, canvas.width, canvas.height);
     const expRef = explanationRefs.current[index];
@@ -425,107 +405,95 @@ function Quiz() {
     if (undoHistoryRefs.current[index].length > 20) undoHistoryRefs.current[index].shift();
 
     redoHistoryRefs.current[index] = [];
+    strokePoints.current = [{ x: offsetX, y: offsetY }];
     isDrawing.current = true;
     updateHistoryState(index);
 
-    if (drawTool === 'pen') {
-      ctx.beginPath();
-      ctx.fillStyle = penColor;
-      ctx.arc(offsetX, offsetY, penWidth / 2, 0, Math.PI * 2);
-      ctx.fill();
-    }
+    ctx.beginPath();
+    ctx.moveTo(offsetX, offsetY);
   };
 
   const draw = (e, index) => {
     const { nativeEvent } = e;
     if (!isDrawing.current || !isDrawingMode || activeCanvasIndex.current !== index) return;
     const canvas = canvasRefs.current[index];
-    const ctx = canvas?.getContext('2d', { desynchronized: true, willReadFrequently: true });
+    const ctx = canvas?.getContext('2d');
     if (!ctx) return;
 
-    const now = Date.now();
-    const dt = Math.max(1, now - lastTime.current);
-
     const rect = canvas.getBoundingClientRect();
-    const rawX = nativeEvent.clientX - rect.left;
-    const rawY = nativeEvent.clientY - rect.top;
+    const offsetX = nativeEvent.clientX - rect.left;
+    const offsetY = nativeEvent.clientY - rect.top;
 
-    const currentPt = { x: rawX, y: rawY };
+    strokePoints.current.push({ x: offsetX, y: offsetY });
+    const pts = strokePoints.current;
 
-    if (lastPt.current.x === currentPt.x && lastPt.current.y === currentPt.y) return;
-
-    strokePoints.current.push(currentPt);
-
-    if (drawTool === 'pen' || drawTool === 'eraser') {
-      const midPt = {
-        x: (lastPt.current.x + currentPt.x) / 2,
-        y: (lastPt.current.y + currentPt.y) / 2
-      };
-
-      ctx.beginPath();
-      ctx.moveTo(lastMid.current.x, lastMid.current.y);
-      ctx.quadraticCurveTo(lastPt.current.x, lastPt.current.y, midPt.x, midPt.y);
-
-      if (drawTool === 'pen') {
-        ctx.globalCompositeOperation = 'source-over';
-        ctx.strokeStyle = penColor;
-
-        const dist = Math.hypot(currentPt.x - lastPt.current.x, currentPt.y - lastPt.current.y);
-        const speed = dist / dt;
-
-        let targetWidth = penWidth;
-        if (nativeEvent.pointerType === 'pen' && nativeEvent.pressure) {
-          targetWidth = penWidth * (0.3 + nativeEvent.pressure * 1.5);
-        } else {
-          targetWidth = penWidth - (speed * 0.8);
-        }
-
-        targetWidth = Math.max(penWidth * 0.3, Math.min(penWidth * 1.5, targetWidth));
-        if (isNaN(targetWidth)) targetWidth = penWidth;
-
-        currentLineWidth.current += (targetWidth - currentLineWidth.current) * 0.2;
-        ctx.lineWidth = currentLineWidth.current;
-        ctx.shadowBlur = 0;
-
+    // --- PROVEN SMOOTH CURVE LOGIC FROM YOUR WORKING CODE ---
+    const drawSmoothCurve = () => {
+      if (pts.length >= 3) {
+        const prev = pts[pts.length - 3];
+        const mid1 = { x: (prev.x + pts[pts.length - 2].x) / 2, y: (prev.y + pts[pts.length - 2].y) / 2 };
+        const mid2 = { x: (pts[pts.length - 2].x + offsetX) / 2, y: (pts[pts.length - 2].y + offsetY) / 2 };
+        ctx.beginPath();
+        ctx.moveTo(mid1.x, mid1.y);
+        ctx.quadraticCurveTo(pts[pts.length - 2].x, pts[pts.length - 2].y, mid2.x, mid2.y);
         ctx.stroke();
-
-        clearTimeout(holdTimeout.current);
-        holdTimeout.current = setTimeout(() => {
-          if (isDrawing.current && !isSnapped.current) snapShape();
-        }, 800);
-
       } else {
-        ctx.globalCompositeOperation = 'destination-out';
-        ctx.lineWidth = 25;
-        ctx.shadowBlur = 0;
+        ctx.beginPath();
+        ctx.moveTo(pts[0].x, pts[0].y);
+        ctx.lineTo(offsetX, offsetY);
         ctx.stroke();
+      }
+    };
 
-        const expRef = explanationRefs.current[index];
-        if (expRef) {
-          const spans = expRef.querySelectorAll('span[style*="background-color"]');
-          spans.forEach(span => {
-            const rects = span.getClientRects();
-            let hit = false;
-            for (let i = 0; i < rects.length; i++) {
-              const r = rects[i];
-              if (nativeEvent.clientX >= r.left - 5 && nativeEvent.clientX <= r.right + 5 &&
-                nativeEvent.clientY >= r.top - 5 && nativeEvent.clientY <= r.bottom + 5) {
-                hit = true; break;
-              }
+    if (drawTool === 'eraser') {
+      ctx.globalCompositeOperation = 'destination-out';
+      ctx.lineWidth = 25;
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+      ctx.shadowBlur = 0;
+      drawSmoothCurve();
+
+      const expRef = explanationRefs.current[index];
+      if (expRef) {
+        const spans = expRef.querySelectorAll('span[style*="background-color"]');
+        spans.forEach(span => {
+          const rects = span.getClientRects();
+          let hit = false;
+          for (let i = 0; i < rects.length; i++) {
+            const rect = rects[i];
+            if (nativeEvent.clientX >= rect.left - 5 && nativeEvent.clientX <= rect.right + 5 &&
+              nativeEvent.clientY >= rect.top - 5 && nativeEvent.clientY <= rect.bottom + 5) {
+              hit = true;
+              break;
             }
-            if (hit) {
-              const parent = span.parentNode;
-              while (span.firstChild) parent.insertBefore(span.firstChild, span);
-              parent.removeChild(span);
-              isHighlightErased.current = true;
+          }
+          if (hit) {
+            const parent = span.parentNode;
+            while (span.firstChild) {
+              parent.insertBefore(span.firstChild, span);
             }
-          });
-        }
+            parent.removeChild(span);
+            isHighlightErased.current = true;
+          }
+        });
       }
 
-      lastPt.current = currentPt;
-      lastMid.current = midPt;
-      lastTime.current = now;
+    } else if (drawTool === 'pen') {
+      if (isSnapped.current) return;
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = 1.0;
+      ctx.strokeStyle = penColor;
+      ctx.lineWidth = penWidth;
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+      ctx.shadowBlur = 0.5; // Smooth Apple Pencil blending
+      ctx.shadowColor = penColor;
+      drawSmoothCurve();
+
+      clearTimeout(holdTimeout.current);
+      holdTimeout.current = setTimeout(() => {
+        if (isDrawing.current && !isSnapped.current) snapShape();
+      }, 600);
 
     } else {
       ctx.putImageData(snapshot.current, 0, 0);
@@ -533,18 +501,19 @@ function Quiz() {
       ctx.globalAlpha = 1.0;
       ctx.strokeStyle = penColor;
       ctx.lineWidth = penWidth;
-      ctx.shadowBlur = 0;
+      ctx.shadowBlur = 1;
+      ctx.shadowColor = penColor;
       ctx.beginPath();
 
       if (drawTool === 'line') {
         ctx.moveTo(startX.current, startY.current);
-        ctx.lineTo(rawX, rawY);
+        ctx.lineTo(offsetX, offsetY);
       } else if (drawTool === 'rectangle') {
-        const width = rawX - startX.current;
-        const height = rawY - startY.current;
+        const width = offsetX - startX.current;
+        const height = offsetY - startY.current;
         ctx.rect(startX.current, startY.current, width, height);
       } else if (drawTool === 'circle') {
-        const radius = Math.sqrt(Math.pow(rawX - startX.current, 2) + Math.pow(rawY - startY.current, 2));
+        const radius = Math.sqrt(Math.pow(offsetX - startX.current, 2) + Math.pow(offsetY - startY.current, 2));
         ctx.arc(startX.current, startY.current, radius, 0, 2 * Math.PI);
       }
       ctx.stroke();
@@ -556,29 +525,25 @@ function Quiz() {
     clearTimeout(holdTimeout.current);
 
     if (isDrawing.current && clientX !== undefined && clientY !== undefined) {
-      if (strokePoints.current.length < 5) {
+      const dist = Math.sqrt(Math.pow(clientX - lastPos.current.x, 2) + Math.pow(clientY - lastPos.current.y, 2));
+      if (dist < 5) {
         const elements = document.elementsFromPoint(clientX, clientY);
         const targetBtn = elements.find(el => el.tagName === 'BUTTON' || el.getAttribute('data-tap-btn') === 'true');
         if (targetBtn) {
           const qIdx = parseInt(targetBtn.getAttribute('data-q-index'));
           const optIdx = parseInt(targetBtn.getAttribute('data-opt-index'));
-          if (!isNaN(qIdx) && !isNaN(optIdx)) handleClick(qIdx, optIdx);
-          else targetBtn.click();
+          if (!isNaN(qIdx) && !isNaN(optIdx)) {
+            handleClick(qIdx, optIdx);
+          } else {
+            targetBtn.click();
+          }
         }
       }
     }
 
     isDrawing.current = false;
     const canvas = canvasRefs.current[index];
-    const ctx = canvas?.getContext('2d', { desynchronized: true, willReadFrequently: true });
-
-    if (ctx && (drawTool === 'pen' || drawTool === 'eraser')) {
-      ctx.beginPath();
-      ctx.moveTo(lastMid.current.x, lastMid.current.y);
-      ctx.lineTo(lastPt.current.x, lastPt.current.y);
-      ctx.stroke();
-    }
-
+    const ctx = canvas?.getContext('2d');
     if (ctx) ctx.closePath();
 
     if (canvas) {
@@ -614,7 +579,7 @@ function Quiz() {
     isDrawing.current = false;
 
     const canvas = canvasRefs.current[index];
-    const ctx = canvas?.getContext('2d', { desynchronized: true, willReadFrequently: true });
+    const ctx = canvas?.getContext('2d');
 
     if (ctx && preStrokeSnapshot.current) {
       ctx.putImageData(preStrokeSnapshot.current, 0, 0);
@@ -636,7 +601,7 @@ function Quiz() {
   const handleUndo = (index) => {
     if (!undoHistoryRefs.current[index] || undoHistoryRefs.current[index].length === 0) return;
     const canvas = canvasRefs.current[index];
-    const ctx = canvas?.getContext('2d', { desynchronized: true, willReadFrequently: true });
+    const ctx = canvas?.getContext('2d');
     const expRef = explanationRefs.current[index];
 
     const currentCanvasState = ctx ? ctx.getImageData(0, 0, canvas.width, canvas.height) : null;
@@ -681,7 +646,7 @@ function Quiz() {
   const handleRedo = (index) => {
     if (!redoHistoryRefs.current[index] || redoHistoryRefs.current[index].length === 0) return;
     const canvas = canvasRefs.current[index];
-    const ctx = canvas?.getContext('2d', { desynchronized: true, willReadFrequently: true });
+    const ctx = canvas?.getContext('2d');
     const expRef = explanationRefs.current[index];
 
     const currentCanvasState = ctx ? ctx.getImageData(0, 0, canvas.width, canvas.height) : null;
@@ -727,7 +692,7 @@ function Quiz() {
     const canvas = canvasRefs.current[index];
     const expRef = explanationRefs.current[index];
 
-    const canvasState = canvas ? canvas.getContext('2d', { desynchronized: true, willReadFrequently: true }).getImageData(0, 0, canvas.width, canvas.height) : null;
+    const canvasState = canvas ? canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height) : null;
     const htmlState = expRef ? expRef.innerHTML : "";
 
     if (!undoHistoryRefs.current[index]) undoHistoryRefs.current[index] = [];
@@ -737,7 +702,7 @@ function Quiz() {
     updateHistoryState(index);
 
     if (canvas) {
-      canvas.getContext('2d', { desynchronized: true, willReadFrequently: true }).clearRect(0, 0, canvas.width, canvas.height);
+      canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
       canvas.dataset.loaded = "empty";
     }
     if (expRef) expRef.innerHTML = questions[index].explanation;
@@ -784,7 +749,7 @@ function Quiz() {
       questions.forEach((_, index) => {
         const canvas = canvasRefs.current[index];
         if (canvas) {
-          canvas.getContext('2d', { desynchronized: true, willReadFrequently: true }).clearRect(0, 0, canvas.width, canvas.height);
+          canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
           canvas.dataset.loaded = "empty";
         }
         const expRef = explanationRefs.current[index];
@@ -813,7 +778,7 @@ function Quiz() {
 
     const htmlState = expRef.innerHTML;
     const canvas = canvasRefs.current[index];
-    const canvasState = canvas ? canvas.getContext('2d', { desynchronized: true, willReadFrequently: true }).getImageData(0, 0, canvas.width, canvas.height) : null;
+    const canvasState = canvas ? canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height) : null;
 
     if (!undoHistoryRefs.current[index]) undoHistoryRefs.current[index] = [];
     undoHistoryRefs.current[index].push({ canvas: canvasState, html: htmlState });
@@ -849,7 +814,7 @@ function Quiz() {
 
     const htmlState = expRef.innerHTML;
     const canvas = canvasRefs.current[index];
-    const canvasState = canvas ? canvas.getContext('2d', { desynchronized: true, willReadFrequently: true }).getImageData(0, 0, canvas.width, canvas.height) : null;
+    const canvasState = canvas ? canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height) : null;
 
     if (!undoHistoryRefs.current[index]) undoHistoryRefs.current[index] = [];
     undoHistoryRefs.current[index].push({ canvas: canvasState, html: htmlState });
@@ -925,6 +890,7 @@ function Quiz() {
   return (
     <div style={{ padding: "20px", paddingBottom: "100px", fontFamily: "Arial", maxWidth: "1100px", margin: "0 auto", userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none" }}>
 
+      {/* --- GLOBAL TOP HEADER WITH MAIN SAVE BUTTON --- */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h2>{subjName} - {chapterName}</h2>
         <div style={{ display: "flex", gap: "10px" }}>
@@ -1076,6 +1042,7 @@ function Quiz() {
               ↪
             </button>
 
+            {/* --- IN-TOOLBAR SAVE BUTTON FOR CONVENIENCE --- */}
             <div style={tb.sep} />
             <button
               onClick={() => { manualSaveToCloud(); setActiveMenu(null); }}
@@ -1198,7 +1165,7 @@ function Quiz() {
                     stopDrawing(index, e.clientX, e.clientY);
                   }
                 }}
-                onPointerLeave={(e) => { // --- FIX: Changed from onPointerOut ---
+                onPointerLeave={(e) => { // --- THE CRITICAL FIX FOR MOUSE DRAGGING ---
                   if (isDrawing.current && activePointers.current.size <= 1) {
                     stopDrawing(index, e.clientX, e.clientY);
                   }
