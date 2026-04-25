@@ -38,6 +38,7 @@ function Quiz() {
   const [penColor, setPenColor] = useState('#FF003C');
   const [highlightColor, setHighlightColor] = useState('#FFF800');
   const [penWidth, setPenWidth] = useState(2);
+  const [activeMenu, setActiveMenu] = useState(null); // Tracks open pop-up menus
 
   const [drawings, setDrawings] = useState({});
   const [historyState, setHistoryState] = useState({});
@@ -290,6 +291,7 @@ function Quiz() {
     setCurrent(newIndex);
     setIsDrawingMode(false);
     setIsHighlightMode(false);
+    setActiveMenu(null);
     if (!isRetakeMode) syncToCloud({ current: newIndex }, true);
   };
 
@@ -392,6 +394,8 @@ function Quiz() {
       window.hasAlertedForLoginScratchpad = true;
     }
 
+    if (activeMenu) setActiveMenu(null); // Hide any open menus when drawing starts
+
     activeCanvasIndex.current = index;
     const { clientX, clientY } = nativeEvent;
     lastPos.current = { x: clientX, y: clientY };
@@ -439,7 +443,6 @@ function Quiz() {
 
     ctx.beginPath();
     ctx.moveTo(offsetX, offsetY);
-    // Draw a microscopic dot immediately so single-taps don't fail
     ctx.lineTo(offsetX + 0.01, offsetY + 0.01);
     ctx.stroke();
   };
@@ -462,10 +465,9 @@ function Quiz() {
     if (drawTool === 'pen' || drawTool === 'eraser') {
       const dist = Math.hypot(rawX - smoothingPos.current.x, rawY - smoothingPos.current.y);
 
-      // Stop overlapping lines and microscopic jitter
-      if (dist < 1.0) return;
+      if (dist < 2.5) return;
 
-      const tension = 0.4;
+      const tension = 0.25;
       const smoothX = smoothingPos.current.x + (rawX - smoothingPos.current.x) * tension;
       const smoothY = smoothingPos.current.y + (rawY - smoothingPos.current.y) * tension;
 
@@ -478,12 +480,10 @@ function Quiz() {
         if (nativeEvent.pointerType === 'pen' && nativeEvent.pressure) {
           targetWidth = penWidth * (0.3 + nativeEvent.pressure * 1.5);
         } else {
-          // Speed to thickness math shielded against Division By Zero
           const speed = dist / dt;
           targetWidth = penWidth / (1 + speed * 0.4);
         }
 
-        // Shield Canvas state from NaN corruption
         targetWidth = Math.max(penWidth * 0.3, Math.min(penWidth * 1.8, targetWidth));
         if (isNaN(targetWidth)) targetWidth = penWidth;
 
@@ -990,7 +990,7 @@ function Quiz() {
 
         const tb = {
           wrap: {
-            display: "flex", flexWrap: "wrap", gap: "8px", padding: "8px 12px",
+            display: "flex", flexWrap: "nowrap", gap: "8px", padding: "8px 12px",
             background: "linear-gradient(135deg, #1e1e2e 0%, #2a2a3e 100%)",
             borderRadius: "12px",
             maxWidth: "98vw", alignItems: "center", boxShadow: "0 8px 32px rgba(0,0,0,0.3)",
@@ -1005,8 +1005,8 @@ function Quiz() {
             color: active ? "#fff" : "#ccc", boxShadow: active ? `0 2px 12px ${from}55` : "none",
             transition: "all 0.2s ease"
           }),
-          sep: { width: "1px", height: "24px", background: "rgba(255,255,255,0.15)", margin: "0 2px" },
-          card: { display: "flex", gap: "6px", alignItems: "center", background: "rgba(255,255,255,0.06)", borderRadius: "8px", padding: "4px 10px", border: "1px solid rgba(255,255,255,0.1)" },
+          sep: { width: "1px", height: "24px", background: "rgba(255,255,255,0.15)", margin: "0 2px", flexShrink: 0 },
+          card: { display: "flex", gap: "6px", alignItems: "center", background: "rgba(255,255,255,0.06)", borderRadius: "8px", padding: "4px 10px", border: "1px solid rgba(255,255,255,0.1)", cursor: "pointer" },
           label: { fontSize: "0.7rem", fontWeight: 700, color: "rgba(255,255,255,0.5)", letterSpacing: "0.05em", textTransform: "uppercase" },
           dot: (active, bg) => ({
             width: "22px", height: "22px", borderRadius: "50%", border: active ? "3px solid #fff" : "2px solid rgba(255,255,255,0.2)",
@@ -1021,6 +1021,22 @@ function Quiz() {
             display: "inline-flex", alignItems: "center", gap: "4px", padding: "5px 10px", border: "1px solid rgba(255,255,255,0.15)", borderRadius: "6px", cursor: active ? "pointer" : "not-allowed",
             fontWeight: 600, fontSize: "0.78rem", background: "rgba(255,255,255,0.06)", color: "#ccc", transition: "all 0.2s", opacity: active ? 1 : 0.4
           })
+        };
+
+        const popoverStyle = {
+          position: "absolute",
+          top: "calc(100% + 10px)", // Rendered below the dropdown button for top-anchored toolbar
+          left: "50%",
+          transform: "translateX(-50%)",
+          background: "linear-gradient(135deg, #1e1e2e 0%, #2a2a3e 100%)",
+          padding: "8px",
+          borderRadius: "12px",
+          boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
+          display: "flex",
+          gap: "6px",
+          border: "1.5px solid rgba(255,255,255,0.1)",
+          zIndex: 10001,
+          flexWrap: "nowrap"
         };
 
         const penColors = [
@@ -1038,22 +1054,22 @@ function Quiz() {
         return (
           <div style={tb.wrap}>
             <button onClick={() => {
-              if (isDrawingMode && drawTool !== 'eraser') setIsDrawingMode(false);
-              else { setIsDrawingMode(true); setIsHighlightMode(false); if (drawTool === 'eraser') setDrawTool('pen'); }
+              if (isDrawingMode && drawTool !== 'eraser') { setIsDrawingMode(false); setActiveMenu(null); }
+              else { setIsDrawingMode(true); setIsHighlightMode(false); if (drawTool === 'eraser') setDrawTool('pen'); setActiveMenu(null); }
             }} style={tb.pill(isDrawingMode && drawTool !== 'eraser', '#7c6fff', '#4a90d9')}>
               ✏️ Pen
             </button>
 
             <button onClick={() => {
-              if (isHighlightMode) setIsHighlightMode(false);
-              else { setIsHighlightMode(true); setIsDrawingMode(false); }
+              if (isHighlightMode) { setIsHighlightMode(false); setActiveMenu(null); }
+              else { setIsHighlightMode(true); setIsDrawingMode(false); setActiveMenu(null); }
             }} style={tb.pill(isHighlightMode, '#ff9f43', '#ee5a24')}>
               🖍️ Highlighter
             </button>
 
             <button onClick={() => {
-              if (isDrawingMode && drawTool === 'eraser') setIsDrawingMode(false);
-              else { setIsDrawingMode(true); setIsHighlightMode(false); setDrawTool('eraser'); }
+              if (isDrawingMode && drawTool === 'eraser') { setIsDrawingMode(false); setActiveMenu(null); }
+              else { setIsDrawingMode(true); setIsHighlightMode(false); setDrawTool('eraser'); setActiveMenu(null); }
             }} style={tb.pill(isDrawingMode && drawTool === 'eraser', '#ff4757', '#c0392b')}>
               🧽 Eraser
             </button>
@@ -1061,30 +1077,36 @@ function Quiz() {
             <div style={tb.sep} />
 
             <button
-              onClick={() => canUndo && handleUndo(current)}
+              onClick={() => { canUndo && handleUndo(current); setActiveMenu(null); }}
               style={tb.undoBtn(canUndo)}
               title="Undo Session Action"
               disabled={!canUndo}
             >
-              ↩ Undo
+              ↩
             </button>
             <button
-              onClick={() => canRedo && handleRedo(current)}
+              onClick={() => { canRedo && handleRedo(current); setActiveMenu(null); }}
               style={tb.undoBtn(canRedo)}
               title="Redo Session Action"
               disabled={!canRedo}
             >
-              ↪ Redo
+              ↪
             </button>
 
             {isHighlightMode && (
               <>
                 <div style={tb.sep} />
-                <div style={tb.card}>
-                  <span style={tb.label}>Color</span>
-                  {hlColors.map(({ c, n }) => (
-                    <button key={c} title={n} onClick={() => setHighlightColor(c)} style={tb.dot(highlightColor === c, c)} />
-                  ))}
+                <div style={{ position: 'relative' }}>
+                  <button onClick={() => setActiveMenu(activeMenu === 'hColor' ? null : 'hColor')} style={tb.card}>
+                    <div style={tb.dot(true, highlightColor)} /> ▼
+                  </button>
+                  {activeMenu === 'hColor' && (
+                    <div style={popoverStyle}>
+                      {hlColors.map(({ c, n }) => (
+                        <button key={c} title={n} onClick={() => { setHighlightColor(c); setActiveMenu(null); }} style={tb.dot(highlightColor === c, c)} />
+                      ))}
+                    </div>
+                  )}
                 </div>
               </>
             )}
@@ -1092,33 +1114,48 @@ function Quiz() {
             {isDrawingMode && drawTool !== 'eraser' && (
               <>
                 <div style={tb.sep} />
-                <div style={tb.card}>
-                  {tools.map(({ v, icon, label }) => (
-                    <button key={v} title={label} onClick={() => setDrawTool(v)} style={tb.toolBtn(drawTool === v)}>{icon} {label}</button>
-                  ))}
+
+                {/* TOOL SELECTOR POP-UP */}
+                <div style={{ position: 'relative' }}>
+                  <button onClick={() => setActiveMenu(activeMenu === 'tool' ? null : 'tool')} style={tb.toolBtn(true)}>
+                    {tools.find(t => t.v === drawTool)?.icon} ▼
+                  </button>
+                  {activeMenu === 'tool' && (
+                    <div style={popoverStyle}>
+                      {tools.map(({ v, icon, label }) => (
+                        <button key={v} title={label} onClick={() => { setDrawTool(v); setActiveMenu(null); }} style={tb.toolBtn(drawTool === v)}>{icon}</button>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
-                <div style={tb.card}>
-                  <span style={tb.label}>Ink</span>
-                  {penColors.map(({ c, n }) => (
-                    <button key={c} title={n} onClick={() => setPenColor(c)} style={tb.dot(penColor === c, c)} />
-                  ))}
+                {/* PEN COLOR POP-UP */}
+                <div style={{ position: 'relative' }}>
+                  <button onClick={() => setActiveMenu(activeMenu === 'color' ? null : 'color')} style={tb.card}>
+                    <div style={tb.dot(true, penColor)} /> ▼
+                  </button>
+                  {activeMenu === 'color' && (
+                    <div style={popoverStyle}>
+                      {penColors.map(({ c, n }) => (
+                        <button key={c} title={n} onClick={() => { setPenColor(c); setActiveMenu(null); }} style={tb.dot(penColor === c, c)} />
+                      ))}
+                    </div>
+                  )}
                 </div>
 
-                <div style={{ ...tb.card, gap: "10px", minWidth: "150px" }}>
+                <div style={{ ...tb.card, gap: "10px", minWidth: "100px", cursor: "default" }}>
                   <span style={tb.label}>Size</span>
                   <input type="range" min="1" max="20" value={penWidth}
                     onChange={(e) => setPenWidth(Number(e.target.value))}
-                    style={{ flex: 1, accentColor: "#7c6fff", cursor: "pointer" }} />
-                  <span style={{ color: "#aaa", fontSize: "0.78rem", minWidth: "20px" }}>{penWidth}</span>
+                    style={{ flex: 1, accentColor: "#7c6fff", cursor: "pointer", width: "60px" }} />
                 </div>
               </>
             )}
 
             {!isSubmitted && hasEditsOnPage && (
-              <button onClick={() => clearPage(current)}
+              <button onClick={() => { clearPage(current); setActiveMenu(null); }}
                 style={{ ...tb.pill(false, '#ff4757', '#c0392b'), marginLeft: "auto", color: "#ffbaba", background: "rgba(255,71,87,0.15)", border: "1px solid rgba(255,71,87,0.4)" }}>
-                Erase Full Page
+                Clear Page
               </button>
             )}
           </div>
@@ -1163,7 +1200,6 @@ function Quiz() {
                   }
                 }}
                 onPointerOut={(e) => {
-                  activePointers.current.delete(e.pointerId);
                   if (isDrawing.current && activePointers.current.size <= 1) stopDrawing(index);
                 }}
                 onPointerCancel={(e) => {
