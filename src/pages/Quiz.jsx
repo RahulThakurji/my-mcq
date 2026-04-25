@@ -427,7 +427,6 @@ function Quiz() {
     strokePoints.current.push({ x: offsetX, y: offsetY });
     const pts = strokePoints.current;
 
-    // --- PROVEN SMOOTH CURVE LOGIC FROM YOUR WORKING CODE ---
     const drawSmoothCurve = () => {
       if (pts.length >= 3) {
         const prev = pts[pts.length - 3];
@@ -486,7 +485,7 @@ function Quiz() {
       ctx.lineWidth = penWidth;
       ctx.lineJoin = 'round';
       ctx.lineCap = 'round';
-      ctx.shadowBlur = 0.5; // Smooth Apple Pencil blending
+      ctx.shadowBlur = 0.5;
       ctx.shadowColor = penColor;
       drawSmoothCurve();
 
@@ -1165,7 +1164,7 @@ function Quiz() {
                     stopDrawing(index, e.clientX, e.clientY);
                   }
                 }}
-                onPointerLeave={(e) => { // --- THE CRITICAL FIX FOR MOUSE DRAGGING ---
+                onPointerLeave={(e) => {
                   if (isDrawing.current && activePointers.current.size <= 1) {
                     stopDrawing(index, e.clientX, e.clientY);
                   }
@@ -1300,16 +1299,19 @@ function Quiz() {
           })}
         </div>
 
+        {/* --- UPDATED PALETTE (5-Column Scrollable Grid) --- */}
         <div style={{
-          width: "180px", flexShrink: 0, position: "sticky", top: "20px", background: "#fff",
+          width: "220px", flexShrink: 0, position: "sticky", top: "20px", background: "#fff",
           borderRadius: "14px", border: "1px solid #eee", padding: "15px",
-          boxShadow: "0 4px 15px rgba(0,0,0,0.03)", display: (isSubmitted && !isRetakeMode) ? "none" : "block"
+          boxShadow: "0 4px 15px rgba(0,0,0,0.03)", display: (isSubmitted && !isRetakeMode) ? "none" : "flex", flexDirection: "column",
+          maxHeight: "calc(100vh - 40px)" // Prevents the whole palette from overflowing the screen
         }}>
-          <h3 style={{ fontSize: "0.95rem", marginBottom: "12px", color: "#333", borderBottom: "1px solid #eee", paddingBottom: "8px", display: "flex", justifyContent: "space-between" }}>
-            Palette <span>{questions.length} Qs</span>
-          </h3>
 
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "6px" }}>
+          {/* Scrollable Grid Area */}
+          <div style={{
+            display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: "6px",
+            overflowY: "auto", paddingRight: "4px", paddingBottom: "4px", flexGrow: 1, maxHeight: "320px", alignContent: "start"
+          }}>
             {questions.map((_, index) => {
               const isAnswered = isRetakeMode ? retakeAnswers[index] !== undefined : selectedAnswers[index] !== undefined;
               const isCurrent = current === index;
@@ -1319,10 +1321,11 @@ function Quiz() {
                   key={index}
                   onClick={() => handleQuestionChange(index)}
                   style={{
-                    width: "100%", aspectRatio: "1", border: "1px solid #ddd", borderRadius: "6px", cursor: "pointer",
-                    fontWeight: "800", fontSize: "0.72rem", background: isCurrent ? "#7c6fff" : isAnswered ? "#2ed573" : "#f8f9fa",
+                    width: "100%", aspectRatio: "1", border: "1px solid #ddd", borderRadius: "4px", cursor: "pointer",
+                    fontWeight: "700", fontSize: "0.75rem", display: "flex", alignItems: "center", justifyContent: "center", padding: "0",
+                    background: isCurrent ? "#7c6fff" : isAnswered ? "#2ed573" : "#f8f9fa",
                     color: (isCurrent || isAnswered) ? "white" : "#555", transition: "all 0.2s ease",
-                    boxShadow: isCurrent ? "0 2px 10px rgba(124,111,255,0.4)" : "none", transform: isCurrent ? "scale(1.08)" : "none"
+                    boxShadow: isCurrent ? "0 2px 8px rgba(124,111,255,0.4)" : "none", transform: isCurrent ? "scale(1.08)" : "none"
                   }}
                 >
                   {index + 1}
@@ -1331,17 +1334,46 @@ function Quiz() {
             })}
           </div>
 
-          <div style={{ marginTop: "25px", paddingTop: "15px", borderTop: "1px solid #eee", fontSize: "0.75rem", fontWeight: "600", color: "#777" }}>
+          {/* Legends */}
+          <div style={{ marginTop: "15px", paddingTop: "15px", borderTop: "1px solid #eee", fontSize: "0.75rem", fontWeight: "600", color: "#777", flexShrink: 0 }}>
             <div style={{ display: "flex", gap: "10px", marginBottom: "10px", alignItems: "center" }}>
-              <div style={{ width: "14px", height: "14px", background: "#7c6fff", borderRadius: "4px" }} /> <span>Current Question</span>
+              <div style={{ width: "12px", height: "12px", background: "#7c6fff", borderRadius: "3px" }} /> <span>Current</span>
             </div>
             <div style={{ display: "flex", gap: "10px", marginBottom: "10px", alignItems: "center" }}>
-              <div style={{ width: "14px", height: "14px", background: "#2ed573", borderRadius: "4px" }} /> <span>Answered</span>
+              <div style={{ width: "12px", height: "12px", background: "#2ed573", borderRadius: "3px" }} /> <span>Answered</span>
             </div>
             <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
-              <div style={{ width: "14px", height: "14px", background: "#f8f9fa", border: "1px solid #ddd", borderRadius: "4px" }} /> <span>Not Answered</span>
+              <div style={{ width: "12px", height: "12px", background: "#f8f9fa", border: "1px solid #ddd", borderRadius: "3px" }} /> <span>Not Answered</span>
             </div>
           </div>
+
+          {/* --- NEW SUBMIT BUTTON INSIDE THE PALETTE --- */}
+          {(!isRetakeMode || !retakeSubmitted) && (
+            <button
+              onClick={() => {
+                if (window.confirm("⚠️ Warning: Are you sure you want to submit? You won't be able to change your answers!")) {
+                  if (isRetakeMode) {
+                    setRetakeSubmitted(true);
+                    queueUpdate({ retakeAnswers, retakeSubmitted: true, current: current });
+                  } else {
+                    submitQuiz();
+                  }
+                }
+              }}
+              style={{
+                ...btnBase,
+                background: "#ff9800",
+                color: "white",
+                marginTop: "15px",
+                width: "100%",
+                padding: "10px",
+                boxShadow: "0 4px 10px rgba(255,152,0,0.3)",
+                flexShrink: 0 // Keeps the submit button firmly at the bottom
+              }}
+            >
+              Submit {isRetakeMode ? "Retake" : "Quiz"}
+            </button>
+          )}
         </div>
       </div>
 
@@ -1349,22 +1381,6 @@ function Quiz() {
         <div style={{ margin: "20px auto 0", width: "100%", display: "flex", gap: "10px", flexWrap: "wrap", justifyContent: "center", maxWidth: "955px" }}>
           <button onClick={prevQuestion} disabled={current === 0} style={btnBase}>Previous</button>
           <button onClick={nextQuestion} disabled={current === questions.length - 1} style={btnBase}>Next</button>
-
-          {current === questions.length - 1 && (!isRetakeMode || !retakeSubmitted) && (
-            <button
-              onClick={() => {
-                if (isRetakeMode) {
-                  setRetakeSubmitted(true);
-                  queueUpdate({ retakeAnswers, retakeSubmitted: true, current: current });
-                } else {
-                  submitQuiz();
-                }
-              }}
-              style={{ ...btnBase, background: "#ff9800", color: "white", marginLeft: "auto" }}
-            >
-              Submit {isRetakeMode ? "Retake" : "Quiz"}
-            </button>
-          )}
         </div>
       )}
 
