@@ -42,7 +42,7 @@ function Quiz() {
   const [drawings, setDrawings] = useState({});
   const [historyState, setHistoryState] = useState({});
 
-  // --- DYNAMIC ZOOM-RESILIENT TOOLBAR STATE (TOP ANCHORED) ---
+  // --- DYNAMIC ZOOM-RESILIENT TOOLBAR STATE ---
   const [toolbarStyle, setToolbarStyle] = useState({
     position: 'fixed',
     top: '15px',
@@ -71,6 +71,8 @@ function Quiz() {
   const startY = useRef(0);
   const snapshot = useRef(null);
   const smoothingPos = useRef({ x: 0, y: 0 }); // Handwriting EMA origin
+  const lastTime = useRef(0);
+  const currentLineWidth = useRef(penWidth);
 
   // Auto-Snap Feature Refs
   const strokePoints = useRef([]);
@@ -90,16 +92,16 @@ function Quiz() {
     }));
   };
 
-  // --- PINCH ZOOM TOOLBAR TRACKER (TOP ANCHORED) ---
+  // --- PINCH ZOOM TOOLBAR TRACKER ---
   useEffect(() => {
     const updateToolbar = () => {
       if (window.visualViewport) {
         const vv = window.visualViewport;
         setToolbarStyle({
           position: 'fixed',
-          top: `${vv.offsetTop + 15}px`, // Locks to the visual top of the screen
-          left: `${vv.offsetLeft + (vv.width / 2)}px`, // Locks to visual center
-          transform: `translate(-50%, 0) scale(${1 / vv.scale})`, // Inverse scale counteracts the zoom
+          top: `${vv.offsetTop + 15}px`,
+          left: `${vv.offsetLeft + (vv.width / 2)}px`,
+          transform: `translate(-50%, 0) scale(${1 / vv.scale})`,
           transformOrigin: 'top center',
           zIndex: 10000,
           width: 'max-content'
@@ -110,7 +112,7 @@ function Quiz() {
     if (window.visualViewport) {
       window.visualViewport.addEventListener('resize', updateToolbar);
       window.visualViewport.addEventListener('scroll', updateToolbar);
-      updateToolbar(); // Init
+      updateToolbar();
     }
 
     return () => {
@@ -167,7 +169,6 @@ function Quiz() {
     return () => unsubscribe();
   }, [user, subjectName, chapterId]);
 
-  // SAFETY NET: Flush queue if user tries to close the tab or unmounts component
   useEffect(() => {
     const handleBeforeUnload = (e) => {
       if (Object.keys(pendingUpdatesRef.current).length > 0) {
@@ -186,7 +187,6 @@ function Quiz() {
     };
   }, [user, subjectName, chapterId]);
 
-  // --- OPTIMIZED CLOUD SYNC ENGINE ---
   const syncToCloud = async (updates, immediate = false) => {
     if (!user) {
       if (!window.hasAlertedForLoginGeneral) {
@@ -439,6 +439,9 @@ function Quiz() {
 
     ctx.beginPath();
     ctx.moveTo(offsetX, offsetY);
+    // Draw a microscopic dot immediately so single-taps don't fail
+    ctx.lineTo(offsetX + 0.01, offsetY + 0.01);
+    ctx.stroke();
   };
 
   const draw = (e, index) => {
@@ -459,7 +462,10 @@ function Quiz() {
     if (drawTool === 'pen' || drawTool === 'eraser') {
       const dist = Math.hypot(rawX - smoothingPos.current.x, rawY - smoothingPos.current.y);
 
-      const tension = 0.5;
+      // Stop overlapping lines and microscopic jitter
+      if (dist < 1.0) return;
+
+      const tension = 0.4;
       const smoothX = smoothingPos.current.x + (rawX - smoothingPos.current.x) * tension;
       const smoothY = smoothingPos.current.y + (rawY - smoothingPos.current.y) * tension;
 
@@ -472,12 +478,17 @@ function Quiz() {
         if (nativeEvent.pointerType === 'pen' && nativeEvent.pressure) {
           targetWidth = penWidth * (0.3 + nativeEvent.pressure * 1.5);
         } else {
+          // Speed to thickness math shielded against Division By Zero
           const speed = dist / dt;
           targetWidth = penWidth / (1 + speed * 0.4);
         }
 
+        // Shield Canvas state from NaN corruption
         targetWidth = Math.max(penWidth * 0.3, Math.min(penWidth * 1.8, targetWidth));
+        if (isNaN(targetWidth)) targetWidth = penWidth;
+
         currentLineWidth.current = currentLineWidth.current + (targetWidth - currentLineWidth.current) * 0.3;
+        if (isNaN(currentLineWidth.current)) currentLineWidth.current = penWidth;
       }
     } else {
       strokePoints.current.push({ x: rawX, y: rawY });
@@ -984,8 +995,8 @@ function Quiz() {
             borderRadius: "12px",
             maxWidth: "98vw", alignItems: "center", boxShadow: "0 8px 32px rgba(0,0,0,0.3)",
             border: (isDrawingMode || isHighlightMode) ? "1.5px solid #7c6fff" : "1.5px solid rgba(255,255,255,0.1)",
-            transition: "border 0.3s ease, box-shadow 0.3s ease", // Excluded transform/top/left transitions to prevent zooming lag
-            ...toolbarStyle // <-- Dynamic Visual Viewport Tracker is applied here
+            transition: "border 0.3s ease, box-shadow 0.3s ease",
+            ...toolbarStyle
           },
           pill: (active, from, to) => ({
             display: "inline-flex", alignItems: "center", gap: "5px", padding: "6px 14px", border: "none", borderRadius: "999px", cursor: "pointer",
@@ -1152,6 +1163,7 @@ function Quiz() {
                   }
                 }}
                 onPointerOut={(e) => {
+                  activePointers.current.delete(e.pointerId);
                   if (isDrawing.current && activePointers.current.size <= 1) stopDrawing(index);
                 }}
                 onPointerCancel={(e) => {
