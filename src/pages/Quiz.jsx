@@ -42,6 +42,16 @@ function Quiz() {
   const [drawings, setDrawings] = useState({});
   const [historyState, setHistoryState] = useState({});
 
+  // Dynamic Zoom-Resilient Toolbar Position
+  const [toolbarStyle, setToolbarStyle] = useState({
+    position: 'fixed',
+    bottom: '15px',
+    left: '50%',
+    transform: 'translateX(-50%)',
+    zIndex: 10000,
+    width: 'max-content'
+  });
+
   const activePointers = useRef(new Set());
   const canvasRefs = useRef({});
   const undoHistoryRefs = useRef({});
@@ -82,6 +92,37 @@ function Quiz() {
       }
     }));
   };
+
+  // --- PINCH ZOOM TOOLBAR TRACKER ---
+  useEffect(() => {
+    const updateToolbar = () => {
+      if (window.visualViewport) {
+        const vv = window.visualViewport;
+        setToolbarStyle({
+          position: 'fixed',
+          top: `${vv.offsetTop + vv.height - 15}px`, // Locks to visual bottom
+          left: `${vv.offsetLeft + (vv.width / 2)}px`, // Locks to visual center
+          transform: `translate(-50%, -100%) scale(${1 / vv.scale})`, // Inverse scale so it doesn't get huge when zooming
+          transformOrigin: 'bottom center',
+          zIndex: 10000,
+          width: 'max-content'
+        });
+      }
+    };
+
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', updateToolbar);
+      window.visualViewport.addEventListener('scroll', updateToolbar);
+      updateToolbar(); // Init
+    }
+
+    return () => {
+      if (window.visualViewport) {
+        window.visualViewport.removeEventListener('resize', updateToolbar);
+        window.visualViewport.removeEventListener('scroll', updateToolbar);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     loadQuiz(subjectName, chapterId).then(data => {
@@ -390,7 +431,6 @@ function Quiz() {
 
     redoHistoryRefs.current[index] = [];
 
-    // Reset Handwritting Variables
     strokePoints.current = [{ x: offsetX, y: offsetY }];
     smoothingPos.current = { x: offsetX, y: offsetY };
     lastTime.current = Date.now();
@@ -417,13 +457,9 @@ function Quiz() {
     const rawX = nativeEvent.clientX - rect.left;
     const rawY = nativeEvent.clientY - rect.top;
 
-    // --- iPAD HIGH-FIDELITY HANDWRITING LOGIC ---
     if (drawTool === 'pen' || drawTool === 'eraser') {
       const dist = Math.hypot(rawX - smoothingPos.current.x, rawY - smoothingPos.current.y);
 
-      // Removed the strict dist < 2.5 blocker so small cursive loops draw perfectly.
-
-      // EMA Smoothing - Soft tension interpolates the curve beautifully
       const tension = 0.5;
       const smoothX = smoothingPos.current.x + (rawX - smoothingPos.current.x) * tension;
       const smoothY = smoothingPos.current.y + (rawY - smoothingPos.current.y) * tension;
@@ -431,29 +467,22 @@ function Quiz() {
       smoothingPos.current = { x: smoothX, y: smoothY };
       strokePoints.current.push({ x: smoothX, y: smoothY });
 
-      // Dynamic Line Width Calculation (Pressure & Velocity)
       if (drawTool === 'pen') {
         let targetWidth = penWidth;
 
         if (nativeEvent.pointerType === 'pen' && nativeEvent.pressure) {
-          // Hardware Stylus: Responds to actual pen pressure
           targetWidth = penWidth * (0.3 + nativeEvent.pressure * 1.5);
         } else {
-          // Mouse/Finger: Responds to speed (Faster = thinner trailing line)
           const speed = dist / dt;
           targetWidth = penWidth / (1 + speed * 0.4);
         }
 
-        // Keep thickness within realistic bounds
         targetWidth = Math.max(penWidth * 0.3, Math.min(penWidth * 1.8, targetWidth));
-
-        // Ease the transition so it doesn't jump abruptly
         currentLineWidth.current = currentLineWidth.current + (targetWidth - currentLineWidth.current) * 0.3;
       }
     } else {
       strokePoints.current.push({ x: rawX, y: rawY });
     }
-    // ---------------------------------------------------
 
     const pts = strokePoints.current;
 
@@ -512,7 +541,6 @@ function Quiz() {
       ctx.globalCompositeOperation = 'source-over';
       ctx.globalAlpha = 1.0;
       ctx.strokeStyle = penColor;
-      // DYNAMIC WIDTH APPLIED HERE
       ctx.lineWidth = currentLineWidth.current;
       ctx.lineJoin = 'round';
       ctx.lineCap = 'round';
@@ -954,11 +982,10 @@ function Quiz() {
           wrap: {
             display: "flex", flexWrap: "wrap", gap: "8px", padding: "8px 12px",
             background: "linear-gradient(135deg, #1e1e2e 0%, #2a2a3e 100%)",
-            borderRadius: "12px", position: "fixed", bottom: "15px", left: "50%",
-            transform: "translateX(-50%)", zIndex: 1000, width: "max-content",
+            borderRadius: "12px",
             maxWidth: "98vw", alignItems: "center", boxShadow: "0 8px 32px rgba(0,0,0,0.3)",
             border: (isDrawingMode || isHighlightMode) ? "1.5px solid #7c6fff" : "1.5px solid rgba(255,255,255,0.1)",
-            transition: "all 0.3s ease"
+            ...toolbarStyle // <-- Dynamic Visual Viewport Tracker is applied here
           },
           pill: (active, from, to) => ({
             display: "inline-flex", alignItems: "center", gap: "5px", padding: "6px 14px", border: "none", borderRadius: "999px", cursor: "pointer",
