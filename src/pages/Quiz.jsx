@@ -64,7 +64,6 @@ function Quiz() {
   const activeCanvasIndex = useRef(null);
   const isDrawing = useRef(false);
 
-  // --- CLOUD SYNC OPTIMIZATION REFS ---
   const pendingUpdatesRef = useRef({});
 
   // --- ZERO-LATENCY INCREMENTAL RENDER REFS ---
@@ -259,6 +258,8 @@ function Quiz() {
           const ctx = canvas.getContext('2d', { desynchronized: true, willReadFrequently: true });
           if (needsResize) {
             ctx.scale(ratio, ratio);
+            ctx.imageSmoothingEnabled = true;
+            ctx.imageSmoothingQuality = 'high';
           }
 
           ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -312,7 +313,7 @@ function Quiz() {
       return;
     }
 
-    if (isSubmitted || showExp[qIdx]) return;
+    if (isSubmitted || isDrawingMode || showExp[qIdx]) return;
 
     setSelectedAnswers(prevAnswers => {
       const newSelectedAnswers = { ...prevAnswers, [qIdx]: optIdx };
@@ -388,8 +389,7 @@ function Quiz() {
     activeCanvasIndex.current = index;
     const { clientX, clientY } = nativeEvent;
 
-    // Drawing is allowed if in drawing mode and either it's review mode or user wants to use it as a scratchpad
-    const isDrawingAllowed = isDrawingMode;
+    const isDrawingAllowed = isRetakeMode ? retakeSubmitted : (isSubmitted || showExp[index]);
     if (!isDrawingAllowed) return;
 
     const canvas = canvasRefs.current[index];
@@ -405,7 +405,6 @@ function Quiz() {
     startX.current = offsetX;
     startY.current = offsetY;
 
-    // Secure tracking variables for this specific stroke
     lastPt.current = { x: offsetX, y: offsetY };
     lastMid.current = { x: offsetX, y: offsetY };
     lastTime.current = Date.now();
@@ -415,7 +414,6 @@ function Quiz() {
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = 'high';
 
     const state = ctx.getImageData(0, 0, canvas.width, canvas.height);
     const expRef = explanationRefs.current[index];
@@ -432,7 +430,6 @@ function Quiz() {
     isDrawing.current = true;
     updateHistoryState(index);
 
-    // Initial dot for quick taps
     if (drawTool === 'pen') {
       ctx.beginPath();
       ctx.fillStyle = penColor;
@@ -457,7 +454,6 @@ function Quiz() {
 
     const currentPt = { x: rawX, y: rawY };
 
-    // Ignore duplicate events
     if (lastPt.current.x === currentPt.x && lastPt.current.y === currentPt.y) return;
 
     strokePoints.current.push(currentPt);
@@ -483,16 +479,13 @@ function Quiz() {
         if (nativeEvent.pointerType === 'pen' && nativeEvent.pressure) {
           targetWidth = penWidth * (0.3 + nativeEvent.pressure * 1.5);
         } else {
-          // Smooth width adjustment for mouse/finger based on speed
           targetWidth = penWidth - (speed * 0.8);
         }
 
-        // Hard clamp limits
         targetWidth = Math.max(penWidth * 0.3, Math.min(penWidth * 1.5, targetWidth));
         if (isNaN(targetWidth)) targetWidth = penWidth;
 
-        // Soft easing to prevent bumpy lines
-        currentLineWidth.current += (targetWidth - currentLineWidth.current) * 0.2;
+        currentLineWidth.current += (targetWidth - currentLineWidth.current) * 0.15;
         ctx.lineWidth = currentLineWidth.current;
         ctx.shadowBlur = 0;
 
@@ -532,13 +525,11 @@ function Quiz() {
         }
       }
 
-      // Update state for the next frame
       lastPt.current = currentPt;
       lastMid.current = midPt;
       lastTime.current = now;
 
     } else {
-      // Shape Tools (Lines, Rectangles, Circles)
       ctx.putImageData(snapshot.current, 0, 0);
       ctx.globalCompositeOperation = 'source-over';
       ctx.globalAlpha = 1.0;
@@ -583,7 +574,6 @@ function Quiz() {
     const canvas = canvasRefs.current[index];
     const ctx = canvas?.getContext('2d', { desynchronized: true, willReadFrequently: true });
 
-    // Complete the final tail of the incremental stroke perfectly
     if (ctx && (drawTool === 'pen' || drawTool === 'eraser')) {
       ctx.beginPath();
       ctx.moveTo(lastMid.current.x, lastMid.current.y);
@@ -1185,14 +1175,56 @@ function Quiz() {
               <div
                 key={index}
                 ref={el => questionContainersRef.current[index] = el}
+                onPointerDown={(e) => {
+                  activePointers.current.add(e.pointerId);
+
+                  if (activePointers.current.size > 1) {
+                    abortDrawing(index);
+                    return;
+                  }
+
+                  if (isDrawingMode && e.target.tagName !== 'INPUT' && e.target.tagName !== 'SELECT') {
+                    e.currentTarget.setPointerCapture(e.pointerId);
+                    startDrawing(e, index);
+                  }
+                }}
+                onPointerMove={(e) => {
+                  if (activePointers.current.size > 1) {
+                    abortDrawing(index);
+                    return;
+                  }
+                  if (isDrawing.current) draw(e, index);
+                }}
+                onPointerUp={(e) => {
+                  activePointers.current.delete(e.pointerId);
+                  if (isDrawing.current) {
+                    e.currentTarget.releasePointerCapture(e.pointerId);
+                    stopDrawing(index, e.clientX, e.clientY);
+                  }
+                }}
+                onPointerOut={(e) => {
+                  if (isDrawing.current && activePointers.current.size <= 1) stopDrawing(index);
+                }}
+                onPointerCancel={(e) => {
+                  activePointers.current.delete(e.pointerId);
+                  abortDrawing(index);
+                }}
                 style={{
                   position: "relative", padding: "30px", paddingBottom: showAll ? "70px" : "30px", marginBottom: "0",
                   borderBottom: showAll && index < questions.length - 1 ? "2px dashed #eee" : "none",
-                  textAlign: "left"
+                  touchAction: isDrawingMode ? "pinch-zoom" : "auto",
+                  userSelect: isDrawingMode ? "none" : "auto",
+                  WebkitUserSelect: isDrawingMode ? "none" : "auto",
+                  WebkitTouchCallout: "none",
+                  textAlign: "left",
+                  cursor: isDrawingMode
+                    ? ((isRetakeMode ? retakeSubmitted : (isSubmitted || showExp[index])) ? getCustomCursor() : 'default')
+                    : 'default'
                 }}
               >
                 <div style={{
-                  display: "flex", alignItems: "flex-start", gap: "8px", marginBottom: "20px"
+                  display: "flex", alignItems: "flex-start", gap: "8px", marginBottom: "20px",
+                  pointerEvents: isDrawingMode ? "none" : "auto", userSelect: isDrawingMode ? "none" : "auto"
                 }}>
                   <span style={{ fontSize: '1.2rem', fontWeight: 'bold' }}>
                     {index + 1}.
@@ -1292,40 +1324,9 @@ function Quiz() {
                 {!isRetakeMode && (
                   <canvas
                     ref={el => canvasRefs.current[index] = el}
-                    onPointerDown={(e) => {
-                      activePointers.current.add(e.pointerId);
-                      if (activePointers.current.size === 1) {
-                        e.currentTarget.setPointerCapture(e.pointerId);
-                        startDrawing(e, index);
-                      } else {
-                        abortDrawing(index);
-                      }
-                    }}
-                    onPointerMove={(e) => {
-                      if (activePointers.current.size > 1) {
-                        abortDrawing(index);
-                        return;
-                      }
-                      if (isDrawing.current) draw(e, index);
-                    }}
-                    onPointerUp={(e) => {
-                      activePointers.current.delete(e.pointerId);
-                      if (isDrawing.current) {
-                        e.currentTarget.releasePointerCapture(e.pointerId);
-                        stopDrawing(index, e.clientX, e.clientY);
-                      }
-                    }}
-                    onPointerOut={(e) => {
-                      if (isDrawing.current && activePointers.current.size <= 1) stopDrawing(index);
-                    }}
-                    onPointerCancel={(e) => {
-                      activePointers.current.delete(e.pointerId);
-                      abortDrawing(index);
-                    }}
                     style={{
                       position: "absolute", top: 0, left: 0, zIndex: 9999,
-                      opacity: (isDrawingMode || isSubmitted || showExp[index]) ? 1 : 0, 
-                      pointerEvents: isDrawingMode ? "auto" : "none", touchAction: "none"
+                      opacity: (isSubmitted || showExp[index]) ? 1 : 0, pointerEvents: "none", touchAction: "none"
                     }}
                   />
                 )}
