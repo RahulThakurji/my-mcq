@@ -204,7 +204,12 @@ function Quiz() {
       const container = questionContainersRef.current[index];
 
       if (canvas && container) {
-        const ratio = window.devicePixelRatio || 1;
+        // --- SUPER-SAMPLING FOR PINCH ZOOM CLARITY ---
+        // By multiplying the device ratio by 2, we generate a massive internal 
+        // backing store for the canvas so it stays crisp when users zoom closely in.
+        const superSampleMultiplier = 2;
+        const ratio = (window.devicePixelRatio || 1) * superSampleMultiplier;
+
         const targetWidth = container.offsetWidth * ratio;
         const targetHeight = container.offsetHeight * ratio;
 
@@ -219,7 +224,12 @@ function Quiz() {
           }
 
           const ctx = canvas.getContext('2d');
-          if (needsResize) ctx.scale(ratio, ratio);
+          if (needsResize) {
+            ctx.scale(ratio, ratio);
+            ctx.imageSmoothingEnabled = true;
+            ctx.imageSmoothingQuality = 'high';
+          }
+
           ctx.clearRect(0, 0, canvas.width, canvas.height);
 
           if (drawings[index]) {
@@ -363,6 +373,12 @@ function Quiz() {
     startX.current = offsetX;
     startY.current = offsetY;
 
+    // Enforce high quality drawing properties for new strokes
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
     const state = ctx.getImageData(0, 0, canvas.width, canvas.height);
     const expRef = explanationRefs.current[index];
     const htmlState = expRef ? expRef.innerHTML : "";
@@ -394,14 +410,14 @@ function Quiz() {
     const rawX = nativeEvent.clientX - rect.left;
     const rawY = nativeEvent.clientY - rect.top;
 
-    // --- HANDWRITING SMOOTHING LOGIC ---
+    // --- HIGH-FIDELITY HANDWRITING SMOOTHING LOGIC ---
     if (drawTool === 'pen' || drawTool === 'eraser') {
-      // 1. Anti-Jitter: Ignore microscopic sensor noise
+      // 1. Anti-Jitter: Ignore microscopic sensor noise that makes lines look shaky
       const dist = Math.hypot(rawX - smoothingPos.current.x, rawY - smoothingPos.current.y);
-      if (dist < 1.5) return;
+      if (dist < 1.0) return; // Tightened threshold for high precision
 
-      // 2. Exponential Moving Average (EMA) for butter-smooth lines
-      const tension = 0.9;
+      // 2. Exponential Moving Average (EMA) for buttery-smooth lines
+      const tension = 0.4; // Reduced to 0.4 so the ink organically trails the pen to smooth loops
       const smoothX = smoothingPos.current.x + (rawX - smoothingPos.current.x) * tension;
       const smoothY = smoothingPos.current.y + (rawY - smoothingPos.current.y) * tension;
 
@@ -411,7 +427,7 @@ function Quiz() {
       // Shape tools need exact raw coordinates
       strokePoints.current.push({ x: rawX, y: rawY });
     }
-    // ------------------------------------
+    // ---------------------------------------------------
 
     const pts = strokePoints.current;
 
@@ -473,7 +489,7 @@ function Quiz() {
       ctx.lineWidth = penWidth;
       ctx.lineJoin = 'round';
       ctx.lineCap = 'round';
-      ctx.shadowBlur = 0.5;
+      ctx.shadowBlur = 0.5; // Gel-pen slight bleed effect
       ctx.shadowColor = penColor;
       drawSmoothCurve();
 
