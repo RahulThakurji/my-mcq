@@ -932,6 +932,66 @@ function Quiz() {
         </div>
       )}
 
+      {/* --- REVIEW MODE HEADER MOVED TO TOP --- */}
+      {isSubmitted && !isRetakeMode && (
+        <div style={{ margin: "20px auto 25px", width: "100%", padding: "20px", background: "#e8f5e9", borderRadius: "8px", textAlign: "center", maxWidth: "955px" }}>
+          <h3 style={{ color: "#2e7d32", marginBottom: "15px" }}>Review Mode</h3>
+          <p style={{ color: "#555", marginBottom: "15px" }}>You can continue adding notes and highlights to any page before downloading.</p>
+          <div style={{ display: "flex", justifyContent: "center", gap: "15px", flexWrap: "wrap" }}>
+            <button onClick={downloadPDF} style={{ ...btnBase, background: "#2196f3", color: "white", fontSize: "1.1rem", padding: "12px 24px", position: "relative", zIndex: 200, pointerEvents: "auto" }}>
+              Download Study Notes (PDF) 📥
+            </button>
+            <button
+              onClick={startFreshRetainNotes}
+              style={{ ...btnBase, background: "#8e44ad", color: "white", fontSize: "1.1rem", padding: "12px 24px", position: "relative", zIndex: 200, pointerEvents: "auto", marginLeft: "15px" }}>
+              Re-take quiz ✨
+            </button>
+            <button
+              onClick={() => {
+                const resetState = { current: 0, retakeAnswers: {}, retakeSubmitted: false };
+                setIsRetakeMode(true);
+                setRetakeAnswers({});
+                setRetakeSubmitted(false);
+                setCurrent(0);
+                queueUpdate(resetState);
+              }}
+              style={{ ...btnBase, background: "#ff9800", color: "white", fontSize: "1.1rem", padding: "12px 24px", position: "relative", zIndex: 200, pointerEvents: "auto" }}
+            >
+              Test Yourself 🔄
+            </button>
+            <button onClick={clearAnnotations} style={{ ...btnBase, background: "#f44336", color: "white", fontSize: "1.1rem", padding: "12px 24px", position: "relative", zIndex: 200, pointerEvents: "auto" }}>
+              Clear Notes 🗑️
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* --- RETAKE RESULTS HEADER MOVED TO TOP --- */}
+      {isRetakeMode && retakeSubmitted && (
+        <div style={{ margin: "20px auto 25px", width: "100%", padding: "20px", background: "#e3f2fd", borderRadius: "8px", textAlign: "center", maxWidth: "955px" }}>
+          <h3 style={{ color: "#1976d2", marginBottom: "15px" }}>Retake Results</h3>
+          {(() => {
+            let correct = 0, wrong = 0, unattempted = 0;
+            questions.forEach((q, index) => {
+              if (retakeAnswers[index] === undefined) unattempted++;
+              else if (retakeAnswers[index] === q.correct) correct++;
+              else wrong++;
+            });
+            return (
+              <div style={{ fontSize: "1.1rem", lineHeight: "1.6" }}>
+                <p>Correct: <strong style={{ color: "#4caf50" }}>{correct}</strong></p>
+                <p>Wrong: <strong style={{ color: "#f44336" }}>{wrong}</strong></p>
+                <p>Unattempted: <strong>{unattempted}</strong></p>
+                <h3 style={{ marginTop: "15px" }}>Score: {correct} / {questions.length}</h3>
+              </div>
+            );
+          })()}
+          <button onClick={() => { setIsRetakeMode(false); setRetakeSubmitted(false); setRetakeAnswers({}); }} style={{ ...btnBase, background: "#1976d2", color: "white", marginTop: "20px", padding: "10px 20px" }}>
+            Exit Retake Mode
+          </button>
+        </div>
+      )}
+
       {!isRetakeMode && (isSubmitted || showExp[current]) && (() => {
         const canUndo = historyState[current]?.undo > 0;
         const canRedo = historyState[current]?.redo > 0;
@@ -1347,7 +1407,7 @@ function Quiz() {
             </div>
           </div>
 
-          {/* --- NEW SUBMIT BUTTON INSIDE THE PALETTE --- */}
+          {/* --- SUBMIT BUTTON INSIDE THE PALETTE --- */}
           {(!isRetakeMode || !retakeSubmitted) && (
             <button
               onClick={() => {
@@ -1381,64 +1441,6 @@ function Quiz() {
         <div style={{ margin: "20px auto 0", width: "100%", display: "flex", gap: "10px", flexWrap: "wrap", justifyContent: "center", maxWidth: "955px" }}>
           <button onClick={prevQuestion} disabled={current === 0} style={btnBase}>Previous</button>
           <button onClick={nextQuestion} disabled={current === questions.length - 1} style={btnBase}>Next</button>
-        </div>
-      )}
-
-      {isRetakeMode && retakeSubmitted && (
-        <div style={{ margin: "30px auto 0", width: "100%", padding: "20px", background: "#e3f2fd", borderRadius: "8px", textAlign: "center", maxWidth: "955px" }}>
-          <h3 style={{ color: "#1976d2", marginBottom: "15px" }}>Retake Results</h3>
-          {(() => {
-            let correct = 0, wrong = 0, unattempted = 0;
-            questions.forEach((q, index) => {
-              if (retakeAnswers[index] === undefined) unattempted++;
-              else if (retakeAnswers[index] === q.correct) correct++;
-              else wrong++;
-            });
-            return (
-              <div style={{ fontSize: "1.1rem", lineHeight: "1.6" }}>
-                <p>Correct: <strong style={{ color: "#4caf50" }}>{correct}</strong></p>
-                <p>Wrong: <strong style={{ color: "#f44336" }}>{wrong}</strong></p>
-                <p>Unattempted: <strong>{unattempted}</strong></p>
-                <h3 style={{ marginTop: "15px" }}>Score: {correct} / {questions.length}</h3>
-              </div>
-            );
-          })()}
-          <button onClick={() => { setIsRetakeMode(false); setRetakeSubmitted(false); setRetakeAnswers({}); }} style={{ ...btnBase, background: "#1976d2", color: "white", marginTop: "20px", padding: "10px 20px" }}>
-            Exit Retake Mode
-          </button>
-        </div>
-      )}
-
-      {isSubmitted && !isRetakeMode && (
-        <div style={{ margin: "30px auto 0", width: "100%", padding: "20px", background: "#e8f5e9", borderRadius: "8px", textAlign: "center", maxWidth: "955px" }}>
-          <h3 style={{ color: "#2e7d32", marginBottom: "15px" }}>Review Mode</h3>
-          <p style={{ color: "#555", marginBottom: "15px" }}>You can continue adding notes and highlights to any page before downloading.</p>
-          <div style={{ display: "flex", justifyContent: "center", gap: "15px", flexWrap: "wrap" }}>
-            <button onClick={downloadPDF} style={{ ...btnBase, background: "#2196f3", color: "white", fontSize: "1.1rem", padding: "12px 24px", position: "relative", zIndex: 200, pointerEvents: "auto" }}>
-              Download Study Notes (PDF) 📥
-            </button>
-            <button
-              onClick={startFreshRetainNotes}
-              style={{ ...btnBase, background: "#8e44ad", color: "white", fontSize: "1.1rem", padding: "12px 24px", position: "relative", zIndex: 200, pointerEvents: "auto", marginLeft: "15px" }}>
-              Re-take quiz ✨
-            </button>
-            <button
-              onClick={() => {
-                const resetState = { current: 0, retakeAnswers: {}, retakeSubmitted: false };
-                setIsRetakeMode(true);
-                setRetakeAnswers({});
-                setRetakeSubmitted(false);
-                setCurrent(0);
-                queueUpdate(resetState);
-              }}
-              style={{ ...btnBase, background: "#ff9800", color: "white", fontSize: "1.1rem", padding: "12px 24px", position: "relative", zIndex: 200, pointerEvents: "auto" }}
-            >
-              Test Yourself 🔄
-            </button>
-            <button onClick={clearAnnotations} style={{ ...btnBase, background: "#f44336", color: "white", fontSize: "1.1rem", padding: "12px 24px", position: "relative", zIndex: 200, pointerEvents: "auto" }}>
-              Clear Notes 🗑️
-            </button>
-          </div>
         </div>
       )}
 
