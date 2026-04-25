@@ -66,7 +66,7 @@ function Quiz() {
 
   const pendingUpdatesRef = useRef({});
 
-  // --- ZERO-LATENCY & ANTI-JITTER REFS ---
+  // --- ZERO-LATENCY INCREMENTAL RENDER REFS ---
   const startX = useRef(0);
   const startY = useRef(0);
   const snapshot = useRef(null);
@@ -75,8 +75,6 @@ function Quiz() {
   const isSnapped = useRef(false);
   const isHighlightErased = useRef(false);
 
-  // Physics Trackers
-  const smoothingPos = useRef({ x: 0, y: 0 });
   const lastPt = useRef({ x: 0, y: 0 });
   const lastMid = useRef({ x: 0, y: 0 });
   const lastTime = useRef(0);
@@ -405,8 +403,6 @@ function Quiz() {
     startX.current = offsetX;
     startY.current = offsetY;
 
-    // Reset smooth trackers exactly to the starting point
-    smoothingPos.current = { x: offsetX, y: offsetY };
     lastPt.current = { x: offsetX, y: offsetY };
     lastMid.current = { x: offsetX, y: offsetY };
     lastTime.current = Date.now();
@@ -454,26 +450,16 @@ function Quiz() {
     const rawX = nativeEvent.clientX - rect.left;
     const rawY = nativeEvent.clientY - rect.top;
 
+    const currentPt = { x: rawX, y: rawY };
+
+    if (lastPt.current.x === currentPt.x && lastPt.current.y === currentPt.y) return;
+
+    strokePoints.current.push(currentPt);
+
     if (drawTool === 'pen' || drawTool === 'eraser') {
-
-      // --- MICRO-EMA (ANTI-JITTER FILTER) ---
-      // Tension 0.65: Fast enough to eliminate lag, soft enough to swallow screen wobble
-      const posTension = 0.65;
-      const smoothX = smoothingPos.current.x + (rawX - smoothingPos.current.x) * posTension;
-      const smoothY = smoothingPos.current.y + (rawY - smoothingPos.current.y) * posTension;
-
-      smoothingPos.current = { x: smoothX, y: smoothY };
-
-      // Micro-cull distance calculation (prevents drawing thousands of points when holding still)
-      const dist = Math.hypot(smoothX - lastPt.current.x, smoothY - lastPt.current.y);
-      if (dist < 0.5) return;
-
-      strokePoints.current.push({ x: smoothX, y: smoothY });
-
-      // Calculate perfect Bezier midpoint from the smoothed hardware coordinates
       const midPt = {
-        x: (lastPt.current.x + smoothX) / 2,
-        y: (lastPt.current.y + smoothY) / 2
+        x: (lastPt.current.x + currentPt.x) / 2,
+        y: (lastPt.current.y + currentPt.y) / 2
       };
 
       ctx.beginPath();
@@ -484,25 +470,23 @@ function Quiz() {
         ctx.globalCompositeOperation = 'source-over';
         ctx.strokeStyle = penColor;
 
+        const dist = Math.hypot(currentPt.x - lastPt.current.x, currentPt.y - lastPt.current.y);
         const speed = dist / dt;
-        let targetWidth = penWidth;
 
-        // Modulate line width securely based on Pressure (Pencil) or Speed (Mouse)
-        if (nativeEvent.pointerType === 'pen' && nativeEvent.pressure !== undefined) {
-          targetWidth = penWidth * (0.3 + nativeEvent.pressure * 1.2);
+        let targetWidth = penWidth;
+        if (nativeEvent.pointerType === 'pen' && nativeEvent.pressure) {
+          targetWidth = penWidth * (0.3 + nativeEvent.pressure * 1.5);
         } else {
-          targetWidth = penWidth - (speed * 0.4);
+          targetWidth = penWidth - (speed * 0.8);
         }
 
-        // Hard clamp limits to prevent NaN or invisible canvas bugs
         targetWidth = Math.max(penWidth * 0.3, Math.min(penWidth * 1.5, targetWidth));
         if (isNaN(targetWidth)) targetWidth = penWidth;
 
-        // WIDTH EMA: Prevents the "sausage link" effect
         currentLineWidth.current += (targetWidth - currentLineWidth.current) * 0.2;
-
         ctx.lineWidth = currentLineWidth.current;
-        ctx.shadowBlur = 0; // Ensures 120fps capability on iOS
+        ctx.shadowBlur = 0;
+
         ctx.stroke();
 
         clearTimeout(holdTimeout.current);
@@ -539,13 +523,11 @@ function Quiz() {
         }
       }
 
-      // Update trackers for the next animation frame
-      lastPt.current = { x: smoothX, y: smoothY };
+      lastPt.current = currentPt;
       lastMid.current = midPt;
       lastTime.current = now;
 
     } else {
-      // Shape Tools
       ctx.putImageData(snapshot.current, 0, 0);
       ctx.globalCompositeOperation = 'source-over';
       ctx.globalAlpha = 1.0;
@@ -943,7 +925,6 @@ function Quiz() {
   return (
     <div style={{ padding: "20px", paddingBottom: "100px", fontFamily: "Arial", maxWidth: "1100px", margin: "0 auto", userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none" }}>
 
-      {/* --- GLOBAL TOP HEADER WITH MAIN SAVE BUTTON --- */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h2>{subjName} - {chapterName}</h2>
         <div style={{ display: "flex", gap: "10px" }}>
@@ -1095,7 +1076,6 @@ function Quiz() {
               ↪
             </button>
 
-            {/* --- IN-TOOLBAR SAVE BUTTON FOR CONVENIENCE --- */}
             <div style={tb.sep} />
             <button
               onClick={() => { manualSaveToCloud(); setActiveMenu(null); }}
@@ -1200,7 +1180,7 @@ function Quiz() {
                   }
 
                   if (isDrawingMode && e.target.tagName !== 'INPUT' && e.target.tagName !== 'SELECT') {
-                    e.currentTarget.setPointerCapture(e.pointerId);
+                    try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) { }
                     startDrawing(e, index);
                   }
                 }}
@@ -1214,12 +1194,14 @@ function Quiz() {
                 onPointerUp={(e) => {
                   activePointers.current.delete(e.pointerId);
                   if (isDrawing.current) {
-                    e.currentTarget.releasePointerCapture(e.pointerId);
+                    try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (err) { }
                     stopDrawing(index, e.clientX, e.clientY);
                   }
                 }}
-                onPointerOut={(e) => {
-                  if (isDrawing.current && activePointers.current.size <= 1) stopDrawing(index);
+                onPointerLeave={(e) => { // --- FIX: Changed from onPointerOut ---
+                  if (isDrawing.current && activePointers.current.size <= 1) {
+                    stopDrawing(index, e.clientX, e.clientY);
+                  }
                 }}
                 onPointerCancel={(e) => {
                   activePointers.current.delete(e.pointerId);
