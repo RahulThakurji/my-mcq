@@ -42,12 +42,13 @@ function Quiz() {
   const [drawings, setDrawings] = useState({});
   const [historyState, setHistoryState] = useState({});
 
-  // Dynamic Zoom-Resilient Toolbar Position
+  // --- DYNAMIC ZOOM-RESILIENT TOOLBAR STATE (TOP ANCHORED) ---
   const [toolbarStyle, setToolbarStyle] = useState({
     position: 'fixed',
-    bottom: '15px',
+    top: '15px',
     left: '50%',
     transform: 'translateX(-50%)',
+    transformOrigin: 'top center',
     zIndex: 10000,
     width: 'max-content'
   });
@@ -69,11 +70,7 @@ function Quiz() {
   const startX = useRef(0);
   const startY = useRef(0);
   const snapshot = useRef(null);
-
-  // --- iPAD SMOOTHING & PRESSURE REFS ---
-  const smoothingPos = useRef({ x: 0, y: 0 });
-  const lastTime = useRef(0);
-  const currentLineWidth = useRef(penWidth);
+  const smoothingPos = useRef({ x: 0, y: 0 }); // Handwriting EMA origin
 
   // Auto-Snap Feature Refs
   const strokePoints = useRef([]);
@@ -93,17 +90,17 @@ function Quiz() {
     }));
   };
 
-  // --- PINCH ZOOM TOOLBAR TRACKER ---
+  // --- PINCH ZOOM TOOLBAR TRACKER (TOP ANCHORED) ---
   useEffect(() => {
     const updateToolbar = () => {
       if (window.visualViewport) {
         const vv = window.visualViewport;
         setToolbarStyle({
           position: 'fixed',
-          top: `${vv.offsetTop + vv.height - 15}px`, // Locks to visual bottom
+          top: `${vv.offsetTop + 15}px`, // Locks to the visual top of the screen
           left: `${vv.offsetLeft + (vv.width / 2)}px`, // Locks to visual center
-          transform: `translate(-50%, -100%) scale(${1 / vv.scale})`, // Inverse scale so it doesn't get huge when zooming
-          transformOrigin: 'bottom center',
+          transform: `translate(-50%, 0) scale(${1 / vv.scale})`, // Inverse scale counteracts the zoom
+          transformOrigin: 'top center',
           zIndex: 10000,
           width: 'max-content'
         });
@@ -170,6 +167,7 @@ function Quiz() {
     return () => unsubscribe();
   }, [user, subjectName, chapterId]);
 
+  // SAFETY NET: Flush queue if user tries to close the tab or unmounts component
   useEffect(() => {
     const handleBeforeUnload = (e) => {
       if (Object.keys(pendingUpdatesRef.current).length > 0) {
@@ -188,6 +186,7 @@ function Quiz() {
     };
   }, [user, subjectName, chapterId]);
 
+  // --- OPTIMIZED CLOUD SYNC ENGINE ---
   const syncToCloud = async (updates, immediate = false) => {
     if (!user) {
       if (!window.hasAlertedForLoginGeneral) {
@@ -985,6 +984,7 @@ function Quiz() {
             borderRadius: "12px",
             maxWidth: "98vw", alignItems: "center", boxShadow: "0 8px 32px rgba(0,0,0,0.3)",
             border: (isDrawingMode || isHighlightMode) ? "1.5px solid #7c6fff" : "1.5px solid rgba(255,255,255,0.1)",
+            transition: "border 0.3s ease, box-shadow 0.3s ease", // Excluded transform/top/left transitions to prevent zooming lag
             ...toolbarStyle // <-- Dynamic Visual Viewport Tracker is applied here
           },
           pill: (active, from, to) => ({
