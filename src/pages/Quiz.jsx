@@ -1025,7 +1025,7 @@ function Quiz() {
 
         const popoverStyle = {
           position: "absolute",
-          top: "calc(100% + 10px)", // Rendered below the dropdown button for top-anchored toolbar
+          top: "calc(100% + 10px)",
           left: "50%",
           transform: "translateX(-50%)",
           background: "linear-gradient(135deg, #1e1e2e 0%, #2a2a3e 100%)",
@@ -1143,11 +1143,20 @@ function Quiz() {
                   )}
                 </div>
 
-                <div style={{ ...tb.card, gap: "10px", minWidth: "100px", cursor: "default" }}>
-                  <span style={tb.label}>Size</span>
-                  <input type="range" min="1" max="20" value={penWidth}
-                    onChange={(e) => setPenWidth(Number(e.target.value))}
-                    style={{ flex: 1, accentColor: "#7c6fff", cursor: "pointer", width: "60px" }} />
+                {/* PEN SIZE POP-UP */}
+                <div style={{ position: 'relative' }}>
+                  <button onClick={() => setActiveMenu(activeMenu === 'size' ? null : 'size')} style={tb.card}>
+                    <div style={{ width: `${Math.max(4, penWidth / 1.5)}px`, height: `${Math.max(4, penWidth / 1.5)}px`, backgroundColor: penColor, borderRadius: '50%' }} />
+                    <span style={{ fontSize: "0.78rem", color: "#ccc", fontWeight: "600", marginLeft: "4px" }}>{penWidth}</span> ▼
+                  </button>
+                  {activeMenu === 'size' && (
+                    <div style={{ ...popoverStyle, padding: "12px", width: "160px", display: "flex", alignItems: "center", gap: "10px" }}>
+                      <input type="range" min="1" max="20" value={penWidth}
+                        onChange={(e) => setPenWidth(Number(e.target.value))}
+                        style={{ flex: 1, accentColor: "#7c6fff", cursor: "pointer" }} />
+                      <span style={{ color: "#fff", fontSize: "0.8rem", fontWeight: "bold" }}>{penWidth}</span>
+                    </div>
+                  )}
                 </div>
               </>
             )}
