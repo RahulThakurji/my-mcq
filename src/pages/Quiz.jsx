@@ -42,7 +42,7 @@ function Quiz() {
   const [drawings, setDrawings] = useState({});
   const [historyState, setHistoryState] = useState({});
 
-  const activePointers = useRef(new Set()); // Tracks multi-touch for zoom cancellation
+  const activePointers = useRef(new Set());
   const canvasRefs = useRef({});
   const undoHistoryRefs = useRef({});
   const redoHistoryRefs = useRef({});
@@ -59,7 +59,11 @@ function Quiz() {
   const startX = useRef(0);
   const startY = useRef(0);
   const snapshot = useRef(null);
-  const smoothingPos = useRef({ x: 0, y: 0 }); // Handwriting EMA origin
+
+  // --- iPAD SMOOTHING & PRESSURE REFS ---
+  const smoothingPos = useRef({ x: 0, y: 0 });
+  const lastTime = useRef(0);
+  const currentLineWidth = useRef(penWidth);
 
   // Auto-Snap Feature Refs
   const strokePoints = useRef([]);
@@ -125,7 +129,6 @@ function Quiz() {
     return () => unsubscribe();
   }, [user, subjectName, chapterId]);
 
-  // SAFETY NET: Flush queue if user tries to close the tab or unmounts component
   useEffect(() => {
     const handleBeforeUnload = (e) => {
       if (Object.keys(pendingUpdatesRef.current).length > 0) {
@@ -144,7 +147,6 @@ function Quiz() {
     };
   }, [user, subjectName, chapterId]);
 
-  // --- OPTIMIZED CLOUD SYNC ENGINE ---
   const syncToCloud = async (updates, immediate = false) => {
     if (!user) {
       if (!window.hasAlertedForLoginGeneral) {
@@ -387,8 +389,13 @@ function Quiz() {
     if (undoHistoryRefs.current[index].length > 20) undoHistoryRefs.current[index].shift();
 
     redoHistoryRefs.current[index] = [];
+
+    // Reset Handwritting Variables
     strokePoints.current = [{ x: offsetX, y: offsetY }];
     smoothingPos.current = { x: offsetX, y: offsetY };
+    lastTime.current = Date.now();
+    currentLineWidth.current = penWidth;
+
     updateHistoryState(index);
 
     ctx.beginPath();
@@ -402,24 +409,47 @@ function Quiz() {
     const ctx = canvas?.getContext('2d');
     if (!ctx) return;
 
+    const now = Date.now();
+    const dt = Math.max(1, now - lastTime.current);
+    lastTime.current = now;
+
     const rect = canvas.getBoundingClientRect();
     const rawX = nativeEvent.clientX - rect.left;
     const rawY = nativeEvent.clientY - rect.top;
 
-    // --- HIGH-FIDELITY HANDWRITING SMOOTHING LOGIC ---
+    // --- iPAD HIGH-FIDELITY HANDWRITING LOGIC ---
     if (drawTool === 'pen' || drawTool === 'eraser') {
       const dist = Math.hypot(rawX - smoothingPos.current.x, rawY - smoothingPos.current.y);
 
-      // 1. Aggressive Anti-Jitter: Blocks the hardware's left/right micro-fluctuations
-      if (dist < 2) return;
+      // Removed the strict dist < 2.5 blocker so small cursive loops draw perfectly.
 
-      // 2. Buttery EMA Smoothing: Lower tension pulls the ink more gently, ironing out wobbles
-      const tension = 0.25;
+      // EMA Smoothing - Soft tension interpolates the curve beautifully
+      const tension = 0.5;
       const smoothX = smoothingPos.current.x + (rawX - smoothingPos.current.x) * tension;
       const smoothY = smoothingPos.current.y + (rawY - smoothingPos.current.y) * tension;
 
       smoothingPos.current = { x: smoothX, y: smoothY };
       strokePoints.current.push({ x: smoothX, y: smoothY });
+
+      // Dynamic Line Width Calculation (Pressure & Velocity)
+      if (drawTool === 'pen') {
+        let targetWidth = penWidth;
+
+        if (nativeEvent.pointerType === 'pen' && nativeEvent.pressure) {
+          // Hardware Stylus: Responds to actual pen pressure
+          targetWidth = penWidth * (0.3 + nativeEvent.pressure * 1.5);
+        } else {
+          // Mouse/Finger: Responds to speed (Faster = thinner trailing line)
+          const speed = dist / dt;
+          targetWidth = penWidth / (1 + speed * 0.4);
+        }
+
+        // Keep thickness within realistic bounds
+        targetWidth = Math.max(penWidth * 0.3, Math.min(penWidth * 1.8, targetWidth));
+
+        // Ease the transition so it doesn't jump abruptly
+        currentLineWidth.current = currentLineWidth.current + (targetWidth - currentLineWidth.current) * 0.3;
+      }
     } else {
       strokePoints.current.push({ x: rawX, y: rawY });
     }
@@ -482,10 +512,11 @@ function Quiz() {
       ctx.globalCompositeOperation = 'source-over';
       ctx.globalAlpha = 1.0;
       ctx.strokeStyle = penColor;
-      ctx.lineWidth = penWidth;
+      // DYNAMIC WIDTH APPLIED HERE
+      ctx.lineWidth = currentLineWidth.current;
       ctx.lineJoin = 'round';
       ctx.lineCap = 'round';
-      ctx.shadowBlur = 0.5;
+      ctx.shadowBlur = 0.2;
       ctx.shadowColor = penColor;
       drawSmoothCurve();
 
