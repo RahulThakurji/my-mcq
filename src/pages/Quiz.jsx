@@ -64,6 +64,7 @@ function Quiz() {
   const activeCanvasIndex = useRef(null);
   const isDrawing = useRef(false);
 
+  // --- CLOUD SYNC OPTIMIZATION REFS ---
   const pendingUpdatesRef = useRef({});
 
   // --- ZERO-LATENCY INCREMENTAL RENDER REFS ---
@@ -79,7 +80,7 @@ function Quiz() {
   const lastMid = useRef({ x: 0, y: 0 });
   const lastTime = useRef(0);
   const currentLineWidth = useRef(penWidth);
-  const strokePoints = useRef([]); // Only kept to trigger auto-shapes if needed
+  const strokePoints = useRef([]);
 
   const updateHistoryState = (index) => {
     setHistoryState(prev => ({
@@ -91,6 +92,7 @@ function Quiz() {
     }));
   };
 
+  // --- PINCH ZOOM TOOLBAR TRACKER ---
   useEffect(() => {
     const updateToolbar = () => {
       if (window.visualViewport) {
@@ -310,7 +312,7 @@ function Quiz() {
       return;
     }
 
-    if (isSubmitted || isDrawingMode || showExp[qIdx]) return;
+    if (isSubmitted || showExp[qIdx]) return;
 
     setSelectedAnswers(prevAnswers => {
       const newSelectedAnswers = { ...prevAnswers, [qIdx]: optIdx };
@@ -386,7 +388,8 @@ function Quiz() {
     activeCanvasIndex.current = index;
     const { clientX, clientY } = nativeEvent;
 
-    const isDrawingAllowed = isRetakeMode ? retakeSubmitted : (isSubmitted || showExp[index]);
+    // Drawing is allowed if in drawing mode and either it's review mode or user wants to use it as a scratchpad
+    const isDrawingAllowed = isDrawingMode;
     if (!isDrawingAllowed) return;
 
     const canvas = canvasRefs.current[index];
@@ -402,6 +405,7 @@ function Quiz() {
     startX.current = offsetX;
     startY.current = offsetY;
 
+    // Secure tracking variables for this specific stroke
     lastPt.current = { x: offsetX, y: offsetY };
     lastMid.current = { x: offsetX, y: offsetY };
     lastTime.current = Date.now();
@@ -411,6 +415,7 @@ function Quiz() {
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
 
     const state = ctx.getImageData(0, 0, canvas.width, canvas.height);
     const expRef = explanationRefs.current[index];
@@ -427,7 +432,7 @@ function Quiz() {
     isDrawing.current = true;
     updateHistoryState(index);
 
-    // Provide instant feedback dot
+    // Initial dot for quick taps
     if (drawTool === 'pen') {
       ctx.beginPath();
       ctx.fillStyle = penColor;
@@ -445,59 +450,65 @@ function Quiz() {
 
     const now = Date.now();
     const dt = Math.max(1, now - lastTime.current);
-    lastTime.current = now;
 
     const rect = canvas.getBoundingClientRect();
     const rawX = nativeEvent.clientX - rect.left;
     const rawY = nativeEvent.clientY - rect.top;
 
-    strokePoints.current.push({ x: rawX, y: rawY }); // Keep array populated for auto-shapes
+    const currentPt = { x: rawX, y: rawY };
+
+    // Ignore duplicate events
+    if (lastPt.current.x === currentPt.x && lastPt.current.y === currentPt.y) return;
+
+    strokePoints.current.push(currentPt);
 
     if (drawTool === 'pen' || drawTool === 'eraser') {
-      const currentPt = { x: rawX, y: rawY };
       const midPt = {
         x: (lastPt.current.x + currentPt.x) / 2,
         y: (lastPt.current.y + currentPt.y) / 2
       };
 
+      ctx.beginPath();
+      ctx.moveTo(lastMid.current.x, lastMid.current.y);
+      ctx.quadraticCurveTo(lastPt.current.x, lastPt.current.y, midPt.x, midPt.y);
+
       if (drawTool === 'pen') {
-        const dist = Math.hypot(currentPt.x - lastPt.current.x, currentPt.y - lastPt.current.y);
-        let targetWidth = penWidth;
-
-        // Modulate line width safely
-        if (nativeEvent.pointerType === 'pen' && nativeEvent.pressure) {
-          targetWidth = penWidth * (0.4 + nativeEvent.pressure);
-        } else {
-          const speed = dist / dt;
-          targetWidth = penWidth / (1 + speed * 0.3);
-        }
-
-        targetWidth = Math.max(penWidth * 0.4, Math.min(penWidth * 1.5, targetWidth));
-        if (isNaN(targetWidth)) targetWidth = penWidth;
-
-        // Heavy lerp prevents sausage links and shaky width
-        currentLineWidth.current += (targetWidth - currentLineWidth.current) * 0.15;
-
         ctx.globalCompositeOperation = 'source-over';
         ctx.strokeStyle = penColor;
+
+        const dist = Math.hypot(currentPt.x - lastPt.current.x, currentPt.y - lastPt.current.y);
+        const speed = dist / dt;
+
+        let targetWidth = penWidth;
+        if (nativeEvent.pointerType === 'pen' && nativeEvent.pressure) {
+          targetWidth = penWidth * (0.3 + nativeEvent.pressure * 1.5);
+        } else {
+          // Smooth width adjustment for mouse/finger based on speed
+          targetWidth = penWidth - (speed * 0.8);
+        }
+
+        // Hard clamp limits
+        targetWidth = Math.max(penWidth * 0.3, Math.min(penWidth * 1.5, targetWidth));
+        if (isNaN(targetWidth)) targetWidth = penWidth;
+
+        // Soft easing to prevent bumpy lines
+        currentLineWidth.current += (targetWidth - currentLineWidth.current) * 0.2;
         ctx.lineWidth = currentLineWidth.current;
         ctx.shadowBlur = 0;
+
+        ctx.stroke();
+
+        clearTimeout(holdTimeout.current);
+        holdTimeout.current = setTimeout(() => {
+          if (isDrawing.current && !isSnapped.current) snapShape();
+        }, 800);
+
       } else {
         ctx.globalCompositeOperation = 'destination-out';
         ctx.lineWidth = 25;
         ctx.shadowBlur = 0;
-      }
+        ctx.stroke();
 
-      // INCREMENTAL RENDER (O(1) complexity, Zero Latency)
-      ctx.beginPath();
-      ctx.moveTo(lastMid.current.x, lastMid.current.y);
-      ctx.quadraticCurveTo(lastPt.current.x, lastPt.current.y, midPt.x, midPt.y);
-      ctx.stroke();
-
-      lastPt.current = currentPt;
-      lastMid.current = midPt;
-
-      if (drawTool === 'eraser') {
         const expRef = explanationRefs.current[index];
         if (expRef) {
           const spans = expRef.querySelectorAll('span[style*="background-color"]');
@@ -508,8 +519,7 @@ function Quiz() {
               const r = rects[i];
               if (nativeEvent.clientX >= r.left - 5 && nativeEvent.clientX <= r.right + 5 &&
                 nativeEvent.clientY >= r.top - 5 && nativeEvent.clientY <= r.bottom + 5) {
-                hit = true;
-                break;
+                hit = true; break;
               }
             }
             if (hit) {
@@ -522,15 +532,13 @@ function Quiz() {
         }
       }
 
-      if (drawTool === 'pen') {
-        clearTimeout(holdTimeout.current);
-        holdTimeout.current = setTimeout(() => {
-          if (isDrawing.current && !isSnapped.current) snapShape();
-        }, 800);
-      }
+      // Update state for the next frame
+      lastPt.current = currentPt;
+      lastMid.current = midPt;
+      lastTime.current = now;
 
     } else {
-      // Shape Overlays require putImageData to act as a preview layer
+      // Shape Tools (Lines, Rectangles, Circles)
       ctx.putImageData(snapshot.current, 0, 0);
       ctx.globalCompositeOperation = 'source-over';
       ctx.globalAlpha = 1.0;
@@ -575,13 +583,15 @@ function Quiz() {
     const canvas = canvasRefs.current[index];
     const ctx = canvas?.getContext('2d', { desynchronized: true, willReadFrequently: true });
 
-    // Complete the final tail of the incremental stroke
+    // Complete the final tail of the incremental stroke perfectly
     if (ctx && (drawTool === 'pen' || drawTool === 'eraser')) {
       ctx.beginPath();
       ctx.moveTo(lastMid.current.x, lastMid.current.y);
       ctx.lineTo(lastPt.current.x, lastPt.current.y);
       ctx.stroke();
     }
+
+    if (ctx) ctx.closePath();
 
     if (canvas) {
       const newDrawUrl = canvas.toDataURL();
@@ -927,6 +937,7 @@ function Quiz() {
   return (
     <div style={{ padding: "20px", paddingBottom: "100px", fontFamily: "Arial", maxWidth: "1100px", margin: "0 auto", userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none" }}>
 
+      {/* --- GLOBAL TOP HEADER WITH MAIN SAVE BUTTON --- */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h2>{subjName} - {chapterName}</h2>
         <div style={{ display: "flex", gap: "10px" }}>
@@ -1078,6 +1089,7 @@ function Quiz() {
               ↪
             </button>
 
+            {/* --- IN-TOOLBAR SAVE BUTTON FOR CONVENIENCE --- */}
             <div style={tb.sep} />
             <button
               onClick={() => { manualSaveToCloud(); setActiveMenu(null); }}
@@ -1173,56 +1185,14 @@ function Quiz() {
               <div
                 key={index}
                 ref={el => questionContainersRef.current[index] = el}
-                onPointerDown={(e) => {
-                  activePointers.current.add(e.pointerId);
-
-                  if (activePointers.current.size > 1) {
-                    abortDrawing(index);
-                    return;
-                  }
-
-                  if (isDrawingMode && e.target.tagName !== 'INPUT' && e.target.tagName !== 'SELECT') {
-                    e.currentTarget.setPointerCapture(e.pointerId);
-                    startDrawing(e, index);
-                  }
-                }}
-                onPointerMove={(e) => {
-                  if (activePointers.current.size > 1) {
-                    abortDrawing(index);
-                    return;
-                  }
-                  if (isDrawing.current) draw(e, index);
-                }}
-                onPointerUp={(e) => {
-                  activePointers.current.delete(e.pointerId);
-                  if (isDrawing.current) {
-                    e.currentTarget.releasePointerCapture(e.pointerId);
-                    stopDrawing(index, e.clientX, e.clientY);
-                  }
-                }}
-                onPointerOut={(e) => {
-                  if (isDrawing.current && activePointers.current.size <= 1) stopDrawing(index);
-                }}
-                onPointerCancel={(e) => {
-                  activePointers.current.delete(e.pointerId);
-                  abortDrawing(index);
-                }}
                 style={{
                   position: "relative", padding: "30px", paddingBottom: showAll ? "70px" : "30px", marginBottom: "0",
                   borderBottom: showAll && index < questions.length - 1 ? "2px dashed #eee" : "none",
-                  touchAction: isDrawingMode ? "pinch-zoom" : "auto",
-                  userSelect: isDrawingMode ? "none" : "auto",
-                  WebkitUserSelect: isDrawingMode ? "none" : "auto",
-                  WebkitTouchCallout: "none",
-                  textAlign: "left",
-                  cursor: isDrawingMode
-                    ? ((isRetakeMode ? retakeSubmitted : (isSubmitted || showExp[index])) ? getCustomCursor() : 'default')
-                    : 'default'
+                  textAlign: "left"
                 }}
               >
                 <div style={{
-                  display: "flex", alignItems: "flex-start", gap: "8px", marginBottom: "20px",
-                  pointerEvents: isDrawingMode ? "none" : "auto", userSelect: isDrawingMode ? "none" : "auto"
+                  display: "flex", alignItems: "flex-start", gap: "8px", marginBottom: "20px"
                 }}>
                   <span style={{ fontSize: '1.2rem', fontWeight: 'bold' }}>
                     {index + 1}.
@@ -1322,9 +1292,40 @@ function Quiz() {
                 {!isRetakeMode && (
                   <canvas
                     ref={el => canvasRefs.current[index] = el}
+                    onPointerDown={(e) => {
+                      activePointers.current.add(e.pointerId);
+                      if (activePointers.current.size === 1) {
+                        e.currentTarget.setPointerCapture(e.pointerId);
+                        startDrawing(e, index);
+                      } else {
+                        abortDrawing(index);
+                      }
+                    }}
+                    onPointerMove={(e) => {
+                      if (activePointers.current.size > 1) {
+                        abortDrawing(index);
+                        return;
+                      }
+                      if (isDrawing.current) draw(e, index);
+                    }}
+                    onPointerUp={(e) => {
+                      activePointers.current.delete(e.pointerId);
+                      if (isDrawing.current) {
+                        e.currentTarget.releasePointerCapture(e.pointerId);
+                        stopDrawing(index, e.clientX, e.clientY);
+                      }
+                    }}
+                    onPointerOut={(e) => {
+                      if (isDrawing.current && activePointers.current.size <= 1) stopDrawing(index);
+                    }}
+                    onPointerCancel={(e) => {
+                      activePointers.current.delete(e.pointerId);
+                      abortDrawing(index);
+                    }}
                     style={{
                       position: "absolute", top: 0, left: 0, zIndex: 9999,
-                      opacity: (isSubmitted || showExp[index]) ? 1 : 0, pointerEvents: "none", touchAction: "none"
+                      opacity: (isDrawingMode || isSubmitted || showExp[index]) ? 1 : 0, 
+                      pointerEvents: isDrawingMode ? "auto" : "none", touchAction: "none"
                     }}
                   />
                 )}
