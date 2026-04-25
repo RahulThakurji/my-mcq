@@ -71,11 +71,13 @@ function Quiz() {
   const startX = useRef(0);
   const startY = useRef(0);
   const snapshot = useRef(null);
+  const smoothingPos = useRef({ x: 0, y: 0 }); // Handwriting EMA origin
   const lastTime = useRef(0);
   const currentLineWidth = useRef(penWidth);
   const strokePoints = useRef([]);
   const holdTimeout = useRef(null);
   const preStrokeSnapshot = useRef(null);
+  const lastPos = useRef({ x: 0, y: 0 });
   const isSnapped = useRef(false);
   const isHighlightErased = useRef(false);
 
@@ -397,12 +399,12 @@ function Quiz() {
     const rect = canvas.getBoundingClientRect();
     const offsetX = clientX - rect.left;
     const offsetY = clientY - rect.top;
-    const pressure = nativeEvent.pressure !== undefined ? nativeEvent.pressure : 0.5;
 
     const ctx = canvas.getContext('2d', { desynchronized: true, willReadFrequently: true });
     isSnapped.current = false;
     startX.current = offsetX;
     startY.current = offsetY;
+    lastPos.current = { x: offsetX, y: offsetY };
 
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
@@ -422,8 +424,8 @@ function Quiz() {
 
     redoHistoryRefs.current[index] = [];
 
-    // Store exact raw coordinates directly, no math altering the touch position
-    strokePoints.current = [{ x: offsetX, y: offsetY, p: pressure }];
+    strokePoints.current = [{ x: offsetX, y: offsetY }];
+    smoothingPos.current = { x: offsetX, y: offsetY };
     lastTime.current = Date.now();
     currentLineWidth.current = penWidth;
     isDrawing.current = true;
@@ -454,89 +456,115 @@ function Quiz() {
     const rawY = nativeEvent.clientY - rect.top;
     const pressure = nativeEvent.pressure !== undefined ? nativeEvent.pressure : 0.5;
 
-    // --- PURE QUADRATIC MIDPOINT ALGORITHM (NO POINT DROPPING) ---
-    // We record every single micro-coordinate from the Apple Pencil
-    strokePoints.current.push({ x: rawX, y: rawY, p: pressure });
-    const pts = strokePoints.current;
+    // Calculate physical distance from the last registered hardware point
+    const rawDist = Math.hypot(rawX - lastPos.current.x, rawY - lastPos.current.y);
+
+    // Drop purely microscopic hardware vibrations that cause jagged shaking
+    if (rawDist < 1.0) return;
+
+    lastPos.current = { x: rawX, y: rawY };
 
     if (drawTool === 'pen' || drawTool === 'eraser') {
-      // Need at least 3 raw points to calculate a perfect bezier curve mid-point
-      if (pts.length < 3) return;
+      // HIGH TENSION = 0.75: The pen ink tightly follows your stylus, restoring perfect lettering capability
+      const tension = 0.75;
+      const smoothX = smoothingPos.current.x + (rawX - smoothingPos.current.x) * tension;
+      const smoothY = smoothingPos.current.y + (rawY - smoothingPos.current.y) * tension;
 
-      const p0 = pts[pts.length - 3];
-      const p1 = pts[pts.length - 2];
-      const p2 = pts[pts.length - 1];
-
-      // Find the exact dead-center between the hardware points
-      const mid1 = { x: (p0.x + p1.x) / 2, y: (p0.y + p1.y) / 2 };
-      const mid2 = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
+      smoothingPos.current = { x: smoothX, y: smoothY };
+      strokePoints.current.push({ x: smoothX, y: smoothY });
 
       if (drawTool === 'pen') {
         let targetWidth = penWidth;
-        if (nativeEvent.pointerType === 'pen') {
-          targetWidth = penWidth * (0.2 + p2.p * 1.8);
+        if (nativeEvent.pointerType === 'pen' && nativeEvent.pressure) {
+          targetWidth = penWidth * (0.4 + pressure * 1.2);
         } else {
-          const dist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
-          const speed = dist / dt;
-          targetWidth = penWidth / (1 + speed * 0.5);
+          const speed = rawDist / dt;
+          targetWidth = penWidth - (speed * 0.5);
         }
 
-        // Clamp width smoothly
-        targetWidth = Math.max(penWidth * 0.3, Math.min(penWidth * 1.8, targetWidth));
+        // Shield Canvas state from NaN corruption
+        targetWidth = Math.max(penWidth * 0.5, Math.min(penWidth * 1.5, targetWidth));
         if (isNaN(targetWidth)) targetWidth = penWidth;
 
-        // Subtle width easing (Fast reaction for no latency)
-        currentLineWidth.current += (targetWidth - currentLineWidth.current) * 0.5;
-
-        ctx.globalCompositeOperation = 'source-over';
-        ctx.strokeStyle = penColor;
-        ctx.lineWidth = currentLineWidth.current;
-      } else {
-        ctx.globalCompositeOperation = 'destination-out';
-        ctx.lineWidth = 25;
+        // BUMP STABILIZER: Eases thickness transitions heavily to stop "jittery sausage" lines
+        currentLineWidth.current += (targetWidth - currentLineWidth.current) * 0.15;
+        if (isNaN(currentLineWidth.current)) currentLineWidth.current = penWidth;
       }
+    } else {
+      strokePoints.current.push({ x: rawX, y: rawY });
+    }
 
-      // Execute curve natively through the GPU
-      ctx.beginPath();
-      ctx.moveTo(mid1.x, mid1.y);
-      ctx.quadraticCurveTo(p1.x, p1.y, mid2.x, mid2.y);
-      ctx.lineCap = 'round';
+    const pts = strokePoints.current;
+
+    const drawSmoothCurve = () => {
+      if (pts.length >= 3) {
+        const p0 = pts[pts.length - 3];
+        const p1 = pts[pts.length - 2];
+        const p2 = pts[pts.length - 1];
+
+        // Perfect Midpoint Bezier Algorithm
+        const mid1 = { x: (p0.x + p1.x) / 2, y: (p0.y + p1.y) / 2 };
+        const mid2 = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
+
+        ctx.beginPath();
+        ctx.moveTo(mid1.x, mid1.y);
+        ctx.quadraticCurveTo(p1.x, p1.y, mid2.x, mid2.y);
+        ctx.stroke();
+      } else if (pts.length === 2) {
+        ctx.beginPath();
+        ctx.moveTo(pts[0].x, pts[0].y);
+        ctx.lineTo(pts[1].x, pts[1].y);
+        ctx.stroke();
+      }
+    };
+
+    if (drawTool === 'eraser') {
+      ctx.globalCompositeOperation = 'destination-out';
+      ctx.lineWidth = 25;
       ctx.lineJoin = 'round';
-      ctx.shadowBlur = 0; // Essential for iPad FPS
-      ctx.stroke();
+      ctx.lineCap = 'round';
+      ctx.shadowBlur = 0;
+      drawSmoothCurve();
 
-      if (drawTool === 'eraser') {
-        const expRef = explanationRefs.current[index];
-        if (expRef) {
-          const spans = expRef.querySelectorAll('span[style*="background-color"]');
-          spans.forEach(span => {
-            const rects = span.getClientRects();
-            let hit = false;
-            for (let i = 0; i < rects.length; i++) {
-              const rect = rects[i];
-              if (nativeEvent.clientX >= rect.left - 5 && nativeEvent.clientX <= rect.right + 5 &&
-                nativeEvent.clientY >= rect.top - 5 && nativeEvent.clientY <= rect.bottom + 5) {
-                hit = true;
-                break;
-              }
+      const expRef = explanationRefs.current[index];
+      if (expRef) {
+        const spans = expRef.querySelectorAll('span[style*="background-color"]');
+        spans.forEach(span => {
+          const rects = span.getClientRects();
+          let hit = false;
+          for (let i = 0; i < rects.length; i++) {
+            const rect = rects[i];
+            if (nativeEvent.clientX >= rect.left - 5 && nativeEvent.clientX <= rect.right + 5 &&
+              nativeEvent.clientY >= rect.top - 5 && nativeEvent.clientY <= rect.bottom + 5) {
+              hit = true;
+              break;
             }
-            if (hit) {
-              const parent = span.parentNode;
-              while (span.firstChild) parent.insertBefore(span.firstChild, span);
-              parent.removeChild(span);
-              isHighlightErased.current = true;
-            }
-          });
-        }
+          }
+          if (hit) {
+            const parent = span.parentNode;
+            while (span.firstChild) parent.insertBefore(span.firstChild, span);
+            parent.removeChild(span);
+            isHighlightErased.current = true;
+          }
+        });
       }
 
-      // Auto-Shape Logic (Only fires if you stop moving entirely)
-      if (drawTool === 'pen') {
-        clearTimeout(holdTimeout.current);
-        holdTimeout.current = setTimeout(() => {
-          if (isDrawing.current && !isSnapped.current) snapShape();
-        }, 800); // 800ms requires an intentional, distinct hold to trigger shapes
-      }
+    } else if (drawTool === 'pen') {
+      if (isSnapped.current) return;
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = 1.0;
+      ctx.strokeStyle = penColor;
+      ctx.lineWidth = currentLineWidth.current;
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+      ctx.shadowBlur = 0; // Essential for zero-latency 120fps iPad rendering
+      drawSmoothCurve();
+
+      // Auto-Shape Logic (Fires on intentional stops)
+      clearTimeout(holdTimeout.current);
+      holdTimeout.current = setTimeout(() => {
+        if (isDrawing.current && !isSnapped.current) snapShape();
+      }, 800);
 
     } else {
       // Regular Shapes (Lines, Rectangles, Circles)
@@ -930,6 +958,7 @@ function Quiz() {
   return (
     <div style={{ padding: "20px", paddingBottom: "100px", fontFamily: "Arial", maxWidth: "1100px", margin: "0 auto", userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none" }}>
 
+      {/* --- GLOBAL TOP HEADER WITH MAIN SAVE BUTTON --- */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h2>{subjName} - {chapterName}</h2>
         <div style={{ display: "flex", gap: "10px" }}>
