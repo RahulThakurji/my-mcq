@@ -411,7 +411,7 @@ function Quiz() {
       const dist = Math.hypot(rawX - smoothingPos.current.x, rawY - smoothingPos.current.y);
 
       // 1. Aggressive Anti-Jitter: Blocks the hardware's left/right micro-fluctuations
-      if (dist < 2.5) return;
+      if (dist < 2) return;
 
       // 2. Buttery EMA Smoothing: Lower tension pulls the ink more gently, ironing out wobbles
       const tension = 0.25;
