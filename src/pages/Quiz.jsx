@@ -16,6 +16,7 @@ function Quiz() {
   const [quizData, setQuizData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
   // --- Quiz Interaction State ---
   const [current, setCurrent] = useState(0);
@@ -65,7 +66,6 @@ function Quiz() {
 
   // --- CLOUD SYNC OPTIMIZATION REFS ---
   const pendingUpdatesRef = useRef({});
-  const syncTimeoutRef = useRef(null);
 
   // Snapshots and Smoothing for shapes
   const startX = useRef(0);
@@ -170,70 +170,62 @@ function Quiz() {
     return () => unsubscribe();
   }, [user, subjectName, chapterId]);
 
+  // --- REFRESH/EXIT WARNING SAFETY NET ---
   useEffect(() => {
     const handleBeforeUnload = (e) => {
-      if (Object.keys(pendingUpdatesRef.current).length > 0) {
+      if (hasUnsavedChanges) {
         e.preventDefault();
-        e.returnValue = "Saving notes to cloud, please wait...";
+        e.returnValue = "You have unsaved changes. Are you sure you want to leave without saving?";
       }
     };
     window.addEventListener("beforeunload", handleBeforeUnload);
 
     return () => {
       window.removeEventListener("beforeunload", handleBeforeUnload);
-      if (user && Object.keys(pendingUpdatesRef.current).length > 0) {
-        const docRef = doc(db, 'users', user.uid, 'quizzes', `${subjectName}-${chapterId}`);
-        updateDoc(docRef, pendingUpdatesRef.current).catch(() => { });
-      }
     };
-  }, [user, subjectName, chapterId]);
+  }, [hasUnsavedChanges]);
 
-  const syncToCloud = async (updates, immediate = false) => {
+  // --- MANUAL SAVING ENGINE ---
+  const queueUpdate = (updates) => {
     if (!user) {
       if (!window.hasAlertedForLoginGeneral) {
-        alert("You are not logged in! Progress will not be saved.");
+        alert("You are not logged in! Progress cannot be saved.");
         window.hasAlertedForLoginGeneral = true;
       }
       return;
     }
-
     pendingUpdatesRef.current = { ...pendingUpdatesRef.current, ...updates };
+    setHasUnsavedChanges(true);
+  };
+
+  const manualSaveToCloud = async () => {
+    if (!user || Object.keys(pendingUpdatesRef.current).length === 0) return;
+
     setIsSaving(true);
+    const updatesToApply = { ...pendingUpdatesRef.current };
+    pendingUpdatesRef.current = {};
+    const docRef = doc(db, 'users', user.uid, 'quizzes', `${subjectName}-${chapterId}`);
 
-    const performSync = async () => {
-      const updatesToApply = { ...pendingUpdatesRef.current };
-      if (Object.keys(updatesToApply).length === 0) {
-        setIsSaving(false);
-        return;
-      }
-
-      pendingUpdatesRef.current = {};
-      const docRef = doc(db, 'users', user.uid, 'quizzes', `${subjectName}-${chapterId}`);
-
-      try {
-        await updateDoc(docRef, updatesToApply);
-      } catch (error) {
-        if (error.code === 'not-found' || String(error).includes('not-found')) {
-          try {
-            await setDoc(docRef, updatesToApply);
-          } catch (setDocError) {
-            console.error("Error creating document:", setDocError);
-          }
-        } else {
-          console.error("Error syncing progress:", error);
+    try {
+      await updateDoc(docRef, updatesToApply);
+      setHasUnsavedChanges(false);
+    } catch (error) {
+      if (error.code === 'not-found' || String(error).includes('not-found')) {
+        try {
+          await setDoc(docRef, updatesToApply);
+          setHasUnsavedChanges(false);
+        } catch (setDocError) {
+          console.error("Error creating document:", setDocError);
+          pendingUpdatesRef.current = { ...updatesToApply, ...pendingUpdatesRef.current };
+          setHasUnsavedChanges(true);
         }
-      } finally {
-        if (Object.keys(pendingUpdatesRef.current).length === 0) {
-          setIsSaving(false);
-        }
+      } else {
+        console.error("Error syncing progress:", error);
+        pendingUpdatesRef.current = { ...updatesToApply, ...pendingUpdatesRef.current };
+        setHasUnsavedChanges(true);
       }
-    };
-
-    clearTimeout(syncTimeoutRef.current);
-    if (immediate) {
-      performSync();
-    } else {
-      syncTimeoutRef.current = setTimeout(performSync, 1500);
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -292,12 +284,12 @@ function Quiz() {
     setIsDrawingMode(false);
     setIsHighlightMode(false);
     setActiveMenu(null);
-    if (!isRetakeMode) syncToCloud({ current: newIndex }, true);
+    if (!isRetakeMode) queueUpdate({ current: newIndex });
   };
 
   const handleShowExplanation = (index) => {
     setShowExp(prev => ({ ...prev, [index]: true }));
-    syncToCloud({ showExp: { ...showExp, [index]: true }, current: current }, true);
+    queueUpdate({ showExp: { ...showExp, [index]: true }, current: current });
   };
 
   const nextQuestion = () => { if (current < questions.length - 1) handleQuestionChange(current + 1); };
@@ -306,7 +298,7 @@ function Quiz() {
   const submitQuiz = () => {
     let newDrawings = drawings;
     setIsSubmitted(true);
-    syncToCloud({ drawings: newDrawings, isSubmitted: true }, true);
+    queueUpdate({ drawings: newDrawings, isSubmitted: true });
   };
 
   const handleClick = (qIdx, optIdx) => {
@@ -329,7 +321,7 @@ function Quiz() {
 
     setSelectedAnswers(prevAnswers => {
       const newSelectedAnswers = { ...prevAnswers, [qIdx]: optIdx };
-      syncToCloud({ selectedAnswers: newSelectedAnswers, current: current }, true);
+      queueUpdate({ selectedAnswers: newSelectedAnswers, current: current });
       return newSelectedAnswers;
     });
   };
@@ -394,7 +386,7 @@ function Quiz() {
       window.hasAlertedForLoginScratchpad = true;
     }
 
-    if (activeMenu) setActiveMenu(null); // Hide any open menus when drawing starts
+    if (activeMenu) setActiveMenu(null);
 
     activeCanvasIndex.current = index;
     const { clientX, clientY } = nativeEvent;
@@ -618,7 +610,7 @@ function Quiz() {
       const newDrawUrl = canvas.toDataURL();
       setDrawings(prev => {
         const newDrawings = { ...prev, [index]: newDrawUrl };
-        if (!isHighlightErased.current) syncToCloud({ drawings: newDrawings });
+        if (!isHighlightErased.current) queueUpdate({ drawings: newDrawings });
         return newDrawings;
       });
       canvas.dataset.loaded = newDrawUrl;
@@ -630,7 +622,7 @@ function Quiz() {
         setSavedExplanations(prev => {
           const newExplanations = { ...prev, [index]: expRef.innerHTML };
           setDrawings(prevDrawings => {
-            syncToCloud({ drawings: prevDrawings, savedExplanations: newExplanations });
+            queueUpdate({ drawings: prevDrawings, savedExplanations: newExplanations });
             return prevDrawings;
           });
           return newExplanations;
@@ -703,7 +695,7 @@ function Quiz() {
           const updates = {};
           if (newDrawUrl !== null) updates.drawings = nextD;
           if (newHtml !== null) updates.savedExplanations = nextE;
-          if (Object.keys(updates).length > 0) syncToCloud(updates);
+          if (Object.keys(updates).length > 0) queueUpdate(updates);
         }
         return nextE;
       });
@@ -748,7 +740,7 @@ function Quiz() {
           const updates = {};
           if (newDrawUrl !== null) updates.drawings = nextD;
           if (newHtml !== null) updates.savedExplanations = nextE;
-          if (Object.keys(updates).length > 0) syncToCloud(updates);
+          if (Object.keys(updates).length > 0) queueUpdate(updates);
         }
         return nextE;
       });
@@ -781,7 +773,7 @@ function Quiz() {
       setSavedExplanations(prevExp => {
         const newExplanations = { ...prevExp };
         delete newExplanations[index];
-        syncToCloud({ drawings: newDrawings, savedExplanations: newExplanations }, true);
+        queueUpdate({ drawings: newDrawings, savedExplanations: newExplanations });
         return newExplanations;
       });
       return newDrawings;
@@ -797,7 +789,7 @@ function Quiz() {
       setIsRetakeMode(false);
       setIsDrawingMode(false);
       setIsHighlightMode(false);
-      syncToCloud({ isSubmitted: false, selectedAnswers: {}, showExp: {}, current: 0 }, true);
+      queueUpdate({ isSubmitted: false, selectedAnswers: {}, showExp: {}, current: 0 });
     }
   };
 
@@ -823,7 +815,7 @@ function Quiz() {
         const expRef = explanationRefs.current[index];
         if (expRef) expRef.innerHTML = questions[index].explanation;
       });
-      syncToCloud({ drawings: {}, savedExplanations: {}, selectedAnswers: {}, showExp: {}, isSubmitted: false, current: 0 }, true);
+      queueUpdate({ drawings: {}, savedExplanations: {}, selectedAnswers: {}, showExp: {}, isSubmitted: false, current: 0 });
     }
   };
 
@@ -866,7 +858,7 @@ function Quiz() {
 
       setSavedExplanations(prev => {
         const newExplanations = { ...prev, [index]: expRef.innerHTML };
-        syncToCloud({ savedExplanations: newExplanations });
+        queueUpdate({ savedExplanations: newExplanations });
         return newExplanations;
       });
     } catch (err) {
@@ -893,7 +885,7 @@ function Quiz() {
     setSavedExplanations(prev => {
       const newExplanations = { ...prev };
       delete newExplanations[index];
-      syncToCloud({ savedExplanations: newExplanations }, true);
+      queueUpdate({ savedExplanations: newExplanations });
       return newExplanations;
     });
 
@@ -958,9 +950,27 @@ function Quiz() {
   return (
     <div style={{ padding: "20px", paddingBottom: "100px", fontFamily: "Arial", maxWidth: "1100px", margin: "0 auto", userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none" }}>
 
+      {/* --- GLOBAL TOP HEADER WITH MAIN SAVE BUTTON --- */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h2>{subjName} - {chapterName}</h2>
         <div style={{ display: "flex", gap: "10px" }}>
+
+          {/* NEW MANUAL SAVE BUTTON */}
+          <button
+            onClick={manualSaveToCloud}
+            disabled={!hasUnsavedChanges || isSaving}
+            style={{
+              ...btnBase,
+              background: hasUnsavedChanges ? "#ff9800" : "#e0e0e0",
+              color: hasUnsavedChanges ? "#fff" : "#888",
+              cursor: hasUnsavedChanges ? "pointer" : "default",
+              boxShadow: hasUnsavedChanges ? "0 2px 8px rgba(255,152,0,0.4)" : "none",
+              transition: "all 0.2s ease"
+            }}
+          >
+            {isSaving ? '⏳ Saving...' : (hasUnsavedChanges ? '💾 Save to Cloud' : '☁️ Saved')}
+          </button>
+
           <button onClick={() => navigate(`/quizzes/${subjectName}`)} style={{ padding: "8px 16px", ...btnBase }}>Back to Chapters</button>
         </div>
       </div>
@@ -979,7 +989,7 @@ function Quiz() {
             border: "3px solid rgba(133,100,4,0.3)", borderRadius: "50%",
             borderTopColor: "#856404", animation: "spin 1s ease-in-out infinite"
           }} />
-          ☁️ Syncing with Cloud...
+          ☁️ Saving to Cloud...
           <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
         </div>
       )}
@@ -1093,6 +1103,17 @@ function Quiz() {
               ↪
             </button>
 
+            {/* --- IN-TOOLBAR SAVE BUTTON FOR CONVENIENCE --- */}
+            <div style={tb.sep} />
+            <button
+              onClick={() => { manualSaveToCloud(); setActiveMenu(null); }}
+              style={tb.pill(hasUnsavedChanges, '#ff9800', '#e67e22')}
+              disabled={!hasUnsavedChanges || isSaving}
+              title="Save Annotations"
+            >
+              {isSaving ? '⏳' : '💾'} {hasUnsavedChanges ? 'Save' : 'Saved'}
+            </button>
+
             {isHighlightMode && (
               <>
                 <div style={tb.sep} />
@@ -1115,7 +1136,6 @@ function Quiz() {
               <>
                 <div style={tb.sep} />
 
-                {/* TOOL SELECTOR POP-UP */}
                 <div style={{ position: 'relative' }}>
                   <button onClick={() => setActiveMenu(activeMenu === 'tool' ? null : 'tool')} style={tb.toolBtn(true)}>
                     {tools.find(t => t.v === drawTool)?.icon} ▼
@@ -1129,7 +1149,6 @@ function Quiz() {
                   )}
                 </div>
 
-                {/* PEN COLOR POP-UP */}
                 <div style={{ position: 'relative' }}>
                   <button onClick={() => setActiveMenu(activeMenu === 'color' ? null : 'color')} style={tb.card}>
                     <div style={tb.dot(true, penColor)} /> ▼
@@ -1143,7 +1162,6 @@ function Quiz() {
                   )}
                 </div>
 
-                {/* PEN SIZE POP-UP */}
                 <div style={{ position: 'relative' }}>
                   <button onClick={() => setActiveMenu(activeMenu === 'size' ? null : 'size')} style={tb.card}>
                     <div style={{ width: `${Math.max(4, penWidth / 1.5)}px`, height: `${Math.max(4, penWidth / 1.5)}px`, backgroundColor: penColor, borderRadius: '50%' }} />
@@ -1396,7 +1414,7 @@ function Quiz() {
               onClick={() => {
                 if (isRetakeMode) {
                   setRetakeSubmitted(true);
-                  syncToCloud({ retakeAnswers, retakeSubmitted: true, current: current }, true);
+                  queueUpdate({ retakeAnswers, retakeSubmitted: true, current: current });
                 } else {
                   submitQuiz();
                 }
@@ -1454,7 +1472,7 @@ function Quiz() {
                 setRetakeAnswers({});
                 setRetakeSubmitted(false);
                 setCurrent(0);
-                syncToCloud(resetState, true);
+                queueUpdate(resetState);
               }}
               style={{ ...btnBase, background: "#ff9800", color: "white", fontSize: "1.1rem", padding: "12px 24px", position: "relative", zIndex: 200, pointerEvents: "auto" }}
             >
