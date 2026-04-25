@@ -71,13 +71,10 @@ function Quiz() {
   const startX = useRef(0);
   const startY = useRef(0);
   const snapshot = useRef(null);
-  const smoothingPos = useRef({ x: 0, y: 0 }); // Handwriting EMA origin
-  const lastTime = useRef(0);
   const currentLineWidth = useRef(penWidth);
   const strokePoints = useRef([]);
   const holdTimeout = useRef(null);
   const preStrokeSnapshot = useRef(null);
-  const lastPos = useRef({ x: 0, y: 0 });
   const isSnapped = useRef(false);
   const isHighlightErased = useRef(false);
 
@@ -252,7 +249,7 @@ function Quiz() {
             canvas.style.height = `${container.offsetHeight}px`;
           }
 
-          // ZERO-LATENCY OVERRIDE: Desynchronized and Frequent Read capabilities enabled
+          // ZERO-LATENCY OVERRIDE
           const ctx = canvas.getContext('2d', { desynchronized: true, willReadFrequently: true });
 
           if (needsResize) {
@@ -404,7 +401,6 @@ function Quiz() {
     isSnapped.current = false;
     startX.current = offsetX;
     startY.current = offsetY;
-    lastPos.current = { x: offsetX, y: offsetY };
 
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
@@ -425,13 +421,11 @@ function Quiz() {
     redoHistoryRefs.current[index] = [];
 
     strokePoints.current = [{ x: offsetX, y: offsetY }];
-    smoothingPos.current = { x: offsetX, y: offsetY };
-    lastTime.current = Date.now();
     currentLineWidth.current = penWidth;
     isDrawing.current = true;
     updateHistoryState(index);
 
-    // Instant Feedback Dot for taps
+    // Initial dot for quick taps
     if (drawTool === 'pen') {
       ctx.beginPath();
       ctx.fillStyle = penColor;
@@ -447,127 +441,94 @@ function Quiz() {
     const ctx = canvas?.getContext('2d', { desynchronized: true, willReadFrequently: true });
     if (!ctx) return;
 
-    const now = Date.now();
-    const dt = Math.max(1, now - lastTime.current);
-    lastTime.current = now;
-
     const rect = canvas.getBoundingClientRect();
     const rawX = nativeEvent.clientX - rect.left;
     const rawY = nativeEvent.clientY - rect.top;
-    const pressure = nativeEvent.pressure !== undefined ? nativeEvent.pressure : 0.5;
 
-    // Calculate physical distance from the last registered hardware point
-    const rawDist = Math.hypot(rawX - lastPos.current.x, rawY - lastPos.current.y);
-
-    // Drop purely microscopic hardware vibrations that cause jagged shaking
-    if (rawDist < 1.0) return;
-
-    lastPos.current = { x: rawX, y: rawY };
-
-    if (drawTool === 'pen' || drawTool === 'eraser') {
-      // HIGH TENSION = 0.75: The pen ink tightly follows your stylus, restoring perfect lettering capability
-      const tension = 0.75;
-      const smoothX = smoothingPos.current.x + (rawX - smoothingPos.current.x) * tension;
-      const smoothY = smoothingPos.current.y + (rawY - smoothingPos.current.y) * tension;
-
-      smoothingPos.current = { x: smoothX, y: smoothY };
-      strokePoints.current.push({ x: smoothX, y: smoothY });
-
-      if (drawTool === 'pen') {
-        let targetWidth = penWidth;
-        if (nativeEvent.pointerType === 'pen' && nativeEvent.pressure) {
-          targetWidth = penWidth * (0.4 + pressure * 1.2);
-        } else {
-          const speed = rawDist / dt;
-          targetWidth = penWidth - (speed * 0.5);
-        }
-
-        // Shield Canvas state from NaN corruption
-        targetWidth = Math.max(penWidth * 0.5, Math.min(penWidth * 1.5, targetWidth));
-        if (isNaN(targetWidth)) targetWidth = penWidth;
-
-        // BUMP STABILIZER: Eases thickness transitions heavily to stop "jittery sausage" lines
-        currentLineWidth.current += (targetWidth - currentLineWidth.current) * 0.15;
-        if (isNaN(currentLineWidth.current)) currentLineWidth.current = penWidth;
-      }
-    } else {
-      strokePoints.current.push({ x: rawX, y: rawY });
-    }
-
+    // Record every single raw coordinate exactly as the hardware delivers it
+    strokePoints.current.push({ x: rawX, y: rawY });
     const pts = strokePoints.current;
 
-    const drawSmoothCurve = () => {
-      if (pts.length >= 3) {
-        const p0 = pts[pts.length - 3];
-        const p1 = pts[pts.length - 2];
-        const p2 = pts[pts.length - 1];
+    if (drawTool === 'pen' || drawTool === 'eraser') {
 
-        // Perfect Midpoint Bezier Algorithm
-        const mid1 = { x: (p0.x + p1.x) / 2, y: (p0.y + p1.y) / 2 };
-        const mid2 = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
+      // Need at least 3 points to formulate a perfect curve
+      if (pts.length < 3) return;
 
-        ctx.beginPath();
-        ctx.moveTo(mid1.x, mid1.y);
-        ctx.quadraticCurveTo(p1.x, p1.y, mid2.x, mid2.y);
-        ctx.stroke();
-      } else if (pts.length === 2) {
-        ctx.beginPath();
-        ctx.moveTo(pts[0].x, pts[0].y);
-        ctx.lineTo(pts[1].x, pts[1].y);
-        ctx.stroke();
+      const p0 = pts[pts.length - 3];
+      const p1 = pts[pts.length - 2];
+      const p2 = pts[pts.length - 1];
+
+      // Native Math: Calculate absolute dead-center of hardware points
+      const mid1 = { x: (p0.x + p1.x) / 2, y: (p0.y + p1.y) / 2 };
+      const mid2 = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
+
+      if (drawTool === 'pen') {
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.globalAlpha = 1.0;
+        ctx.strokeStyle = penColor;
+        ctx.lineJoin = 'round';
+        ctx.lineCap = 'round';
+
+        let targetWidth = penWidth;
+
+        // Add subtle thickness variance for Apple Pencil
+        if (nativeEvent.pointerType === 'pen' && nativeEvent.pressure !== undefined && nativeEvent.pressure > 0) {
+          targetWidth = penWidth * (0.3 + nativeEvent.pressure * 1.5);
+        }
+
+        // Safety lock against NaN canvas corruption
+        if (isNaN(targetWidth) || targetWidth <= 0) targetWidth = penWidth;
+
+        // Smooth width transitions slightly
+        currentLineWidth.current += (targetWidth - currentLineWidth.current) * 0.2;
+        ctx.lineWidth = currentLineWidth.current;
+        ctx.shadowBlur = 0;
+      } else {
+        ctx.globalCompositeOperation = 'destination-out';
+        ctx.lineWidth = 25;
       }
-    };
 
-    if (drawTool === 'eraser') {
-      ctx.globalCompositeOperation = 'destination-out';
-      ctx.lineWidth = 25;
-      ctx.lineJoin = 'round';
-      ctx.lineCap = 'round';
-      ctx.shadowBlur = 0;
-      drawSmoothCurve();
+      // Execute perfect, unhindered bezier curve
+      ctx.beginPath();
+      ctx.moveTo(mid1.x, mid1.y);
+      ctx.quadraticCurveTo(p1.x, p1.y, mid2.x, mid2.y);
+      ctx.stroke();
 
-      const expRef = explanationRefs.current[index];
-      if (expRef) {
-        const spans = expRef.querySelectorAll('span[style*="background-color"]');
-        spans.forEach(span => {
-          const rects = span.getClientRects();
-          let hit = false;
-          for (let i = 0; i < rects.length; i++) {
-            const rect = rects[i];
-            if (nativeEvent.clientX >= rect.left - 5 && nativeEvent.clientX <= rect.right + 5 &&
-              nativeEvent.clientY >= rect.top - 5 && nativeEvent.clientY <= rect.bottom + 5) {
-              hit = true;
-              break;
+      if (drawTool === 'eraser') {
+        const expRef = explanationRefs.current[index];
+        if (expRef) {
+          const spans = expRef.querySelectorAll('span[style*="background-color"]');
+          spans.forEach(span => {
+            const rects = span.getClientRects();
+            let hit = false;
+            for (let i = 0; i < rects.length; i++) {
+              const rect = rects[i];
+              if (nativeEvent.clientX >= rect.left - 5 && nativeEvent.clientX <= rect.right + 5 &&
+                nativeEvent.clientY >= rect.top - 5 && nativeEvent.clientY <= rect.bottom + 5) {
+                hit = true;
+                break;
+              }
             }
-          }
-          if (hit) {
-            const parent = span.parentNode;
-            while (span.firstChild) parent.insertBefore(span.firstChild, span);
-            parent.removeChild(span);
-            isHighlightErased.current = true;
-          }
-        });
+            if (hit) {
+              const parent = span.parentNode;
+              while (span.firstChild) parent.insertBefore(span.firstChild, span);
+              parent.removeChild(span);
+              isHighlightErased.current = true;
+            }
+          });
+        }
       }
 
-    } else if (drawTool === 'pen') {
-      if (isSnapped.current) return;
-      ctx.globalCompositeOperation = 'source-over';
-      ctx.globalAlpha = 1.0;
-      ctx.strokeStyle = penColor;
-      ctx.lineWidth = currentLineWidth.current;
-      ctx.lineJoin = 'round';
-      ctx.lineCap = 'round';
-      ctx.shadowBlur = 0; // Essential for zero-latency 120fps iPad rendering
-      drawSmoothCurve();
-
-      // Auto-Shape Logic (Fires on intentional stops)
-      clearTimeout(holdTimeout.current);
-      holdTimeout.current = setTimeout(() => {
-        if (isDrawing.current && !isSnapped.current) snapShape();
-      }, 800);
+      // Auto-Shape Logic
+      if (drawTool === 'pen') {
+        clearTimeout(holdTimeout.current);
+        holdTimeout.current = setTimeout(() => {
+          if (isDrawing.current && !isSnapped.current) snapShape();
+        }, 800);
+      }
 
     } else {
-      // Regular Shapes (Lines, Rectangles, Circles)
+      // Shape Overlays
       ctx.putImageData(snapshot.current, 0, 0);
       ctx.globalCompositeOperation = 'source-over';
       ctx.globalAlpha = 1.0;
@@ -594,11 +555,9 @@ function Quiz() {
   const stopDrawing = (index, clientX, clientY) => {
     if (activeCanvasIndex.current !== index) return;
     clearTimeout(holdTimeout.current);
-    isDrawing.current = false;
 
-    // Detect if they tapped a button instead of drawing
-    if (clientX !== undefined && clientY !== undefined) {
-      if (strokePoints.current.length < 5) { // If it was a quick tap
+    if (isDrawing.current && clientX !== undefined && clientY !== undefined) {
+      if (strokePoints.current.length < 5) {
         const elements = document.elementsFromPoint(clientX, clientY);
         const targetBtn = elements.find(el => el.tagName === 'BUTTON' || el.getAttribute('data-tap-btn') === 'true');
         if (targetBtn) {
@@ -610,9 +569,23 @@ function Quiz() {
       }
     }
 
+    isDrawing.current = false;
     const canvas = canvasRefs.current[index];
     const ctx = canvas?.getContext('2d', { desynchronized: true, willReadFrequently: true });
-    if (ctx) ctx.closePath();
+
+    // Complete the final tail of the stroke
+    if (ctx && strokePoints.current.length >= 3 && (drawTool === 'pen' || drawTool === 'eraser')) {
+      const p1 = strokePoints.current[strokePoints.current.length - 2];
+      const p2 = strokePoints.current[strokePoints.current.length - 1];
+      const mid2 = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
+      ctx.beginPath();
+      ctx.moveTo(mid2.x, mid2.y);
+      ctx.lineTo(p2.x, p2.y);
+      ctx.stroke();
+      ctx.closePath();
+    } else if (ctx) {
+      ctx.closePath();
+    }
 
     if (canvas) {
       const newDrawUrl = canvas.toDataURL();
@@ -1110,6 +1083,7 @@ function Quiz() {
               ↪
             </button>
 
+            {/* --- IN-TOOLBAR SAVE BUTTON FOR CONVENIENCE --- */}
             <div style={tb.sep} />
             <button
               onClick={() => { manualSaveToCloud(); setActiveMenu(null); }}
