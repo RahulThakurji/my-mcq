@@ -6,23 +6,6 @@ import { loadQuiz } from '../utils/loadQuiz';
 import { useAuth } from '../context/AuthContext';
 import { doc, setDoc, updateDoc, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
-// --- NEW: Premium Ink Library ---
-import { getStroke } from 'perfect-freehand';
-
-// Helper function to convert Perfect Freehand points to an SVG Path string
-function getSvgPathFromStroke(stroke) {
-  if (!stroke.length) return '';
-  const d = stroke.reduce(
-    (acc, [x0, y0], i, arr) => {
-      const [x1, y1] = arr[(i + 1) % arr.length];
-      acc.push(x0, y0, (x0 + x1) / 2, (y0 + y1) / 2);
-      return acc;
-    },
-    ['M', ...stroke[0], 'Q']
-  );
-  d.push('Z');
-  return d.join(' ');
-}
 
 function Quiz() {
   const { subjectName, chapterId } = useParams();
@@ -55,7 +38,7 @@ function Quiz() {
   const [drawTool, setDrawTool] = useState('pen');
   const [penColor, setPenColor] = useState('#FF003C');
   const [highlightColor, setHighlightColor] = useState('#FFF800');
-  const [penWidth, setPenWidth] = useState(4); // Increased base width slightly for the new engine
+  const [penWidth, setPenWidth] = useState(3);
   const [activeMenu, setActiveMenu] = useState(null);
 
   const [drawings, setDrawings] = useState({});
@@ -83,16 +66,20 @@ function Quiz() {
 
   const pendingUpdatesRef = useRef({});
 
-  // Snapshots and Stroke tracking
+  // --- ZERO-LATENCY INCREMENTAL RENDER REFS ---
   const startX = useRef(0);
   const startY = useRef(0);
   const snapshot = useRef(null);
-  const strokePoints = useRef([]);
-  const holdTimeout = useRef(null);
   const preStrokeSnapshot = useRef(null);
-  const lastPos = useRef({ x: 0, y: 0 });
+  const holdTimeout = useRef(null);
   const isSnapped = useRef(false);
   const isHighlightErased = useRef(false);
+
+  const lastPt = useRef({ x: 0, y: 0 });
+  const lastMid = useRef({ x: 0, y: 0 });
+  const lastTime = useRef(0);
+  const currentLineWidth = useRef(penWidth);
+  const strokePoints = useRef([]); // Only kept to trigger auto-shapes if needed
 
   const updateHistoryState = (index) => {
     setHistoryState(prev => ({
@@ -188,8 +175,15 @@ function Quiz() {
       }
     };
     window.addEventListener("beforeunload", handleBeforeUnload);
-    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, [hasUnsavedChanges]);
+
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+      if (user && Object.keys(pendingUpdatesRef.current).length > 0) {
+        const docRef = doc(db, 'users', user.uid, 'quizzes', `${subjectName}-${chapterId}`);
+        updateDoc(docRef, pendingUpdatesRef.current).catch(() => { });
+      }
+    };
+  }, [hasUnsavedChanges, user, subjectName, chapterId]);
 
   const queueUpdate = (updates) => {
     if (!user) {
@@ -246,6 +240,7 @@ function Quiz() {
       if (canvas && container) {
         const superSampleMultiplier = 2;
         const ratio = (window.devicePixelRatio || 1) * superSampleMultiplier;
+
         const targetWidth = container.offsetWidth * ratio;
         const targetHeight = container.offsetHeight * ratio;
 
@@ -355,6 +350,7 @@ function Quiz() {
     ctx.lineWidth = penWidth;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
+    ctx.shadowBlur = 0;
 
     const isClosedShape = gap < diag * 0.3;
 
@@ -399,13 +395,22 @@ function Quiz() {
     const rect = canvas.getBoundingClientRect();
     const offsetX = clientX - rect.left;
     const offsetY = clientY - rect.top;
-    const pressure = nativeEvent.pressure !== undefined ? nativeEvent.pressure : 0.5;
 
     const ctx = canvas.getContext('2d', { desynchronized: true, willReadFrequently: true });
+
     isSnapped.current = false;
     startX.current = offsetX;
     startY.current = offsetY;
-    lastPos.current = { x: offsetX, y: offsetY };
+
+    lastPt.current = { x: offsetX, y: offsetY };
+    lastMid.current = { x: offsetX, y: offsetY };
+    lastTime.current = Date.now();
+    currentLineWidth.current = penWidth;
+    strokePoints.current = [{ x: offsetX, y: offsetY }];
+
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.imageSmoothingEnabled = true;
 
     const state = ctx.getImageData(0, 0, canvas.width, canvas.height);
     const expRef = explanationRefs.current[index];
@@ -419,18 +424,15 @@ function Quiz() {
     if (undoHistoryRefs.current[index].length > 20) undoHistoryRefs.current[index].shift();
 
     redoHistoryRefs.current[index] = [];
-
-    // Store coordinates for Perfect Freehand
-    strokePoints.current = [{ x: offsetX, y: offsetY, p: pressure }];
     isDrawing.current = true;
     updateHistoryState(index);
 
+    // Provide instant feedback dot
     if (drawTool === 'pen') {
-      const strokeOutline = getStroke(strokePoints.current.map(pt => [pt.x, pt.y, pt.p]), { size: penWidth });
-      const pathData = getSvgPathFromStroke(strokeOutline);
-      const path = new Path2D(pathData);
+      ctx.beginPath();
       ctx.fillStyle = penColor;
-      ctx.fill(path);
+      ctx.arc(offsetX, offsetY, penWidth / 2, 0, Math.PI * 2);
+      ctx.fill();
     }
   };
 
@@ -441,86 +443,100 @@ function Quiz() {
     const ctx = canvas?.getContext('2d', { desynchronized: true, willReadFrequently: true });
     if (!ctx) return;
 
+    const now = Date.now();
+    const dt = Math.max(1, now - lastTime.current);
+    lastTime.current = now;
+
     const rect = canvas.getBoundingClientRect();
     const rawX = nativeEvent.clientX - rect.left;
     const rawY = nativeEvent.clientY - rect.top;
-    const pressure = nativeEvent.pressure !== undefined ? nativeEvent.pressure : 0.5;
 
-    strokePoints.current.push({ x: rawX, y: rawY, p: pressure });
+    strokePoints.current.push({ x: rawX, y: rawY }); // Keep array populated for auto-shapes
 
-    if (drawTool === 'pen') {
-      if (isSnapped.current) return;
+    if (drawTool === 'pen' || drawTool === 'eraser') {
+      const currentPt = { x: rawX, y: rawY };
+      const midPt = {
+        x: (lastPt.current.x + currentPt.x) / 2,
+        y: (lastPt.current.y + currentPt.y) / 2
+      };
 
-      // --- PERFECT FREEHAND CORE ---
-      const pts = strokePoints.current.map(pt => [pt.x, pt.y, pt.p]);
-      const strokeOutline = getStroke(pts, {
-        size: penWidth,
-        thinning: 0.6,     // Controls the trailing taper
-        smoothing: 0.5,    // Controls how curves are rounded
-        streamline: 0.5,   // Controls hardware jitter correction
-        simulatePressure: nativeEvent.pointerType !== 'pen' // Simulates pressure for mouse users
-      });
+      if (drawTool === 'pen') {
+        const dist = Math.hypot(currentPt.x - lastPt.current.x, currentPt.y - lastPt.current.y);
+        let targetWidth = penWidth;
 
-      const pathData = getSvgPathFromStroke(strokeOutline);
-      const path = new Path2D(pathData);
+        // Modulate line width safely
+        if (nativeEvent.pointerType === 'pen' && nativeEvent.pressure) {
+          targetWidth = penWidth * (0.4 + nativeEvent.pressure);
+        } else {
+          const speed = dist / dt;
+          targetWidth = penWidth / (1 + speed * 0.3);
+        }
 
-      // Restore the canvas to the state *before* this stroke started
-      ctx.putImageData(preStrokeSnapshot.current, 0, 0);
+        targetWidth = Math.max(penWidth * 0.4, Math.min(penWidth * 1.5, targetWidth));
+        if (isNaN(targetWidth)) targetWidth = penWidth;
 
-      ctx.globalCompositeOperation = 'source-over';
-      ctx.fillStyle = penColor;
-      ctx.fill(path);
+        // Heavy lerp prevents sausage links and shaky width
+        currentLineWidth.current += (targetWidth - currentLineWidth.current) * 0.15;
 
-      clearTimeout(holdTimeout.current);
-      holdTimeout.current = setTimeout(() => {
-        if (isDrawing.current && !isSnapped.current) snapShape();
-      }, 800);
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.strokeStyle = penColor;
+        ctx.lineWidth = currentLineWidth.current;
+        ctx.shadowBlur = 0;
+      } else {
+        ctx.globalCompositeOperation = 'destination-out';
+        ctx.lineWidth = 25;
+        ctx.shadowBlur = 0;
+      }
 
-    } else if (drawTool === 'eraser') {
-      // Incremental wipe for eraser is much faster
-      ctx.globalCompositeOperation = 'destination-out';
-      ctx.lineWidth = 25;
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
-
+      // INCREMENTAL RENDER (O(1) complexity, Zero Latency)
       ctx.beginPath();
-      ctx.moveTo(lastPos.current.x, lastPos.current.y);
-      ctx.lineTo(rawX, rawY);
+      ctx.moveTo(lastMid.current.x, lastMid.current.y);
+      ctx.quadraticCurveTo(lastPt.current.x, lastPt.current.y, midPt.x, midPt.y);
       ctx.stroke();
 
-      lastPos.current = { x: rawX, y: rawY };
+      lastPt.current = currentPt;
+      lastMid.current = midPt;
 
-      const expRef = explanationRefs.current[index];
-      if (expRef) {
-        const spans = expRef.querySelectorAll('span[style*="background-color"]');
-        spans.forEach(span => {
-          const rects = span.getClientRects();
-          let hit = false;
-          for (let i = 0; i < rects.length; i++) {
-            const r = rects[i];
-            if (nativeEvent.clientX >= r.left - 5 && nativeEvent.clientX <= r.right + 5 &&
-              nativeEvent.clientY >= r.top - 5 && nativeEvent.clientY <= r.bottom + 5) {
-              hit = true; break;
+      if (drawTool === 'eraser') {
+        const expRef = explanationRefs.current[index];
+        if (expRef) {
+          const spans = expRef.querySelectorAll('span[style*="background-color"]');
+          spans.forEach(span => {
+            const rects = span.getClientRects();
+            let hit = false;
+            for (let i = 0; i < rects.length; i++) {
+              const r = rects[i];
+              if (nativeEvent.clientX >= r.left - 5 && nativeEvent.clientX <= r.right + 5 &&
+                nativeEvent.clientY >= r.top - 5 && nativeEvent.clientY <= r.bottom + 5) {
+                hit = true;
+                break;
+              }
             }
-          }
-          if (hit) {
-            const parent = span.parentNode;
-            while (span.firstChild) parent.insertBefore(span.firstChild, span);
-            parent.removeChild(span);
-            isHighlightErased.current = true;
-          }
-        });
+            if (hit) {
+              const parent = span.parentNode;
+              while (span.firstChild) parent.insertBefore(span.firstChild, span);
+              parent.removeChild(span);
+              isHighlightErased.current = true;
+            }
+          });
+        }
+      }
+
+      if (drawTool === 'pen') {
+        clearTimeout(holdTimeout.current);
+        holdTimeout.current = setTimeout(() => {
+          if (isDrawing.current && !isSnapped.current) snapShape();
+        }, 800);
       }
 
     } else {
-      // Shape Overlays
+      // Shape Overlays require putImageData to act as a preview layer
       ctx.putImageData(snapshot.current, 0, 0);
       ctx.globalCompositeOperation = 'source-over';
       ctx.globalAlpha = 1.0;
       ctx.strokeStyle = penColor;
       ctx.lineWidth = penWidth;
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
+      ctx.shadowBlur = 0;
       ctx.beginPath();
 
       if (drawTool === 'line') {
@@ -557,6 +573,15 @@ function Quiz() {
 
     isDrawing.current = false;
     const canvas = canvasRefs.current[index];
+    const ctx = canvas?.getContext('2d', { desynchronized: true, willReadFrequently: true });
+
+    // Complete the final tail of the incremental stroke
+    if (ctx && (drawTool === 'pen' || drawTool === 'eraser')) {
+      ctx.beginPath();
+      ctx.moveTo(lastMid.current.x, lastMid.current.y);
+      ctx.lineTo(lastPt.current.x, lastPt.current.y);
+      ctx.stroke();
+    }
 
     if (canvas) {
       const newDrawUrl = canvas.toDataURL();
@@ -902,7 +927,6 @@ function Quiz() {
   return (
     <div style={{ padding: "20px", paddingBottom: "100px", fontFamily: "Arial", maxWidth: "1100px", margin: "0 auto", userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none" }}>
 
-      {/* --- GLOBAL TOP HEADER WITH MAIN SAVE BUTTON --- */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h2>{subjName} - {chapterName}</h2>
         <div style={{ display: "flex", gap: "10px" }}>
