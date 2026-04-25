@@ -843,6 +843,69 @@ function Quiz() {
     return `url('data:image/svg+xml;utf8,${svg}') ${(size + 4) / 2} ${(size + 4) / 2}, crosshair`;
   };
 
+  const downloadPDF = async () => {
+    const element = document.getElementById("pdf-container");
+
+    if (!element) {
+      alert("PDF container not found!");
+      return;
+    }
+
+    // 1. Temporarily bring the element into the viewport but hide it behind other content
+    const originalLeft = element.style.left;
+    const originalTop = element.style.top;
+    const originalZIndex = element.style.zIndex;
+
+    element.style.left = "0px";
+    element.style.top = "0px";
+    element.style.zIndex = "-1000";
+
+    try {
+      // 2. Generate the canvas
+      const canvas = await html2canvas(element, {
+        scale: 2,
+        useCORS: true, // Helpful if you ever add external images
+        windowWidth: element.scrollWidth,
+        windowHeight: element.scrollHeight
+      });
+
+      const imgData = canvas.toDataURL("image/png");
+
+      // 3. Create the PDF
+      const pdf = new jsPDF('p', 'mm', 'a4');
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = pdf.internal.pageSize.getHeight();
+      const margin = 10;
+      const imgWidth = pdfWidth - (margin * 2);
+      const imgHeight = (canvas.height * imgWidth) / canvas.width;
+
+      let heightLeft = imgHeight;
+      let position = margin;
+
+      pdf.addImage(imgData, "PNG", margin, position, imgWidth, imgHeight);
+      heightLeft -= (pdfHeight - (margin * 2));
+
+      // Changed to > 0 to prevent a blank page at the very end
+      while (heightLeft > 0) {
+        position = heightLeft - imgHeight + margin;
+        pdf.addPage();
+        pdf.addImage(imgData, "PNG", margin, position, imgWidth, imgHeight);
+        heightLeft -= (pdfHeight - (margin * 2));
+      }
+
+      pdf.save(`${subjName}-${chapterName}-Notes.pdf`);
+
+    } catch (error) {
+      console.error("Error generating PDF:", error);
+      alert("Failed to generate the PDF. Please check the console for details.");
+    } finally {
+      // 4. Always put the element back where it was, even if the PDF fails
+      element.style.left = originalLeft;
+      element.style.top = originalTop;
+      element.style.zIndex = originalZIndex;
+    }
+  };
+
   if (loading || !isInitialLoadComplete) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', flexDirection: 'column' }}>
@@ -855,34 +918,6 @@ function Quiz() {
   if (!quizData) return <h2>Quiz not found for {subjectName} chapter {chapterId}</h2>;
   const { questions, subjectName: subjName, chapterName } = quizData;
   const hasEditsOnPage = drawings[current] || savedExplanations[current];
-
-  const downloadPDF = async () => {
-    const element = document.getElementById("pdf-container");
-    const canvas = await html2canvas(element, { scale: 2 });
-    const imgData = canvas.toDataURL("image/png");
-
-    const pdf = new jsPDF('p', 'mm', 'a4');
-    const pdfWidth = pdf.internal.pageSize.getWidth();
-    const pdfHeight = pdf.internal.pageSize.getHeight();
-    const margin = 10;
-    const imgWidth = pdfWidth - (margin * 2);
-    const imgHeight = (canvas.height * imgWidth) / canvas.width;
-
-    let heightLeft = imgHeight;
-    let position = margin;
-
-    pdf.addImage(imgData, "PNG", margin, position, imgWidth, imgHeight);
-    heightLeft -= (pdfHeight - (margin * 2));
-
-    while (heightLeft >= 0) {
-      position = heightLeft - imgHeight + margin;
-      pdf.addPage();
-      pdf.addImage(imgData, "PNG", margin, position, imgWidth, imgHeight);
-      heightLeft -= (pdfHeight - (margin * 2));
-    }
-
-    pdf.save(`${subjName}-${chapterName}-Notes.pdf`);
-  };
 
   const btnBase = { padding: "8px 16px", border: "none", borderRadius: "4px", cursor: "pointer", fontWeight: "bold" };
 
@@ -1444,7 +1479,8 @@ function Quiz() {
         </div>
       )}
 
-      <div id="pdf-container" style={{ position: "absolute", left: "-9999px", top: "-9999px", width: "794px", padding: "40px", background: "white", color: "black", fontFamily: "Arial", boxSizing: "border-box" }}>
+      {/* explicitly added zIndex: "-9999" below to pair with the js revert logic */}
+      <div id="pdf-container" style={{ position: "absolute", left: "-9999px", top: "-9999px", zIndex: "-9999", width: "794px", padding: "40px", background: "white", color: "black", fontFamily: "Arial", boxSizing: "border-box" }}>
         <h2>{subjName} - {chapterName} (Review)</h2>
         <hr />
         {questions.map((q, index) => (
