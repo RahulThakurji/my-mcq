@@ -17,6 +17,7 @@ function Quiz() {
   const [loading, setLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
 
   // --- Quiz Interaction State ---
   const [current, setCurrent] = useState(0);
@@ -844,65 +845,67 @@ function Quiz() {
   };
 
   const downloadPDF = async () => {
-    const element = document.getElementById("pdf-container");
-
-    if (!element) {
-      alert("PDF container not found!");
-      return;
-    }
-
-    // 1. Temporarily bring the element into the viewport but hide it behind other content
-    const originalLeft = element.style.left;
-    const originalTop = element.style.top;
-    const originalZIndex = element.style.zIndex;
-
-    element.style.left = "0px";
-    element.style.top = "0px";
-    element.style.zIndex = "-1000";
-
+    setIsDownloading(true);
     try {
-      // 2. Generate the canvas
-      const canvas = await html2canvas(element, {
-        scale: 2,
-        useCORS: true, // Helpful if you ever add external images
-        windowWidth: element.scrollWidth,
-        windowHeight: element.scrollHeight
-      });
-
-      const imgData = canvas.toDataURL("image/png");
-
-      // 3. Create the PDF
-      const pdf = new jsPDF('p', 'mm', 'a4');
+      const pdf = new jsPDF('p', 'mm', 'a4', true); // Enable compression
+      const margin = 10;
       const pdfWidth = pdf.internal.pageSize.getWidth();
       const pdfHeight = pdf.internal.pageSize.getHeight();
-      const margin = 10;
-      const imgWidth = pdfWidth - (margin * 2);
-      const imgHeight = (canvas.height * imgWidth) / canvas.width;
+      const contentWidth = pdfWidth - (margin * 2);
+      let currentY = margin;
 
-      let heightLeft = imgHeight;
-      let position = margin;
+      const BATCH_SIZE = 5; // Process 5 questions at once
 
-      pdf.addImage(imgData, "PNG", margin, position, imgWidth, imgHeight);
-      heightLeft -= (pdfHeight - (margin * 2));
+      for (let i = 0; i < questions.length; i += BATCH_SIZE) {
+        // 1. Create a batch of promises to run in parallel
+        const batchPromises = questions.slice(i, i + BATCH_SIZE).map(async (_, index) => {
+          const qIdx = i + index;
+          const el = questionContainersRef.current[qIdx];
+          if (!el) return null;
 
-      // Changed to > 0 to prevent a blank page at the very end
-      while (heightLeft > 0) {
-        position = heightLeft - imgHeight + margin;
-        pdf.addPage();
-        pdf.addImage(imgData, "PNG", margin, position, imgWidth, imgHeight);
-        heightLeft -= (pdfHeight - (margin * 2));
+          // Force drawing visibility for the capture
+          const drawingCanvas = canvasRefs.current[qIdx];
+          if (drawingCanvas) drawingCanvas.style.opacity = "1";
+
+          const canvas = await html2canvas(el, {
+            scale: 1.3, // Optimized scale: fast but still legible
+            useCORS: true,
+            backgroundColor: "#ffffff",
+            logging: false,
+            imageTimeout: 0,
+          });
+
+          // Convert to highly compressed JPEG immediately
+          const imgData = canvas.toDataURL("image/jpeg", 0.6);
+          const imgHeight = (canvas.height * contentWidth) / canvas.width;
+
+          return { imgData, imgHeight };
+        });
+
+        // 2. Wait for the entire batch to finish capturing
+        const results = await Promise.all(batchPromises);
+
+        // 3. Add batch results to PDF sequentially to maintain order
+        results.forEach((res) => {
+          if (!res) return;
+          const { imgData, imgHeight } = res;
+
+          if (currentY + imgHeight > pdfHeight - margin) {
+            pdf.addPage();
+            currentY = margin;
+          }
+
+          pdf.addImage(imgData, 'JPEG', margin, currentY, contentWidth, imgHeight, undefined, 'FAST');
+          currentY += imgHeight + 6;
+        });
       }
 
-      pdf.save(`${subjName}-${chapterName}-Notes.pdf`);
-
+      pdf.save(`${subjName}_Master_Notes.pdf`);
     } catch (error) {
-      console.error("Error generating PDF:", error);
-      alert("Failed to generate the PDF. Please check the console for details.");
+      console.error("PDF Speed Mode Error:", error);
+      alert("Generation failed. Try a smaller batch size in the code.");
     } finally {
-      // 4. Always put the element back where it was, even if the PDF fails
-      element.style.left = originalLeft;
-      element.style.top = originalTop;
-      element.style.zIndex = originalZIndex;
+      setIsDownloading(false);
     }
   };
 
@@ -929,20 +932,22 @@ function Quiz() {
         <h2>{subjName} - {chapterName}</h2>
         <div style={{ display: "flex", gap: "10px" }}>
 
-          <button
-            onClick={manualSaveToCloud}
-            disabled={!hasUnsavedChanges || isSaving}
-            style={{
-              ...btnBase,
-              background: hasUnsavedChanges ? "#ff9800" : "#e0e0e0",
-              color: hasUnsavedChanges ? "#fff" : "#888",
-              cursor: hasUnsavedChanges ? "pointer" : "default",
-              boxShadow: hasUnsavedChanges ? "0 2px 8px rgba(255,152,0,0.4)" : "none",
-              transition: "all 0.2s ease"
-            }}
-          >
-            {isSaving ? '⏳ Saving...' : (hasUnsavedChanges ? '💾 Save to Cloud' : '☁️ Saved')}
-          </button>
+          {(isDrawingMode || isHighlightMode) && (
+            <button
+              onClick={manualSaveToCloud}
+              disabled={!hasUnsavedChanges || isSaving}
+              style={{
+                ...btnBase,
+                background: hasUnsavedChanges ? "#ff9800" : "#e0e0e0",
+                color: hasUnsavedChanges ? "#fff" : "#888",
+                cursor: hasUnsavedChanges ? "pointer" : "default",
+                boxShadow: hasUnsavedChanges ? "0 2px 8px rgba(255,152,0,0.4)" : "none",
+                transition: "all 0.2s ease"
+              }}
+            >
+              {isSaving ? '⏳ Saving...' : (hasUnsavedChanges ? '💾 Save to Cloud' : '☁️ Saved')}
+            </button>
+          )}
 
           <button onClick={() => navigate(`/quizzes/${subjectName}`)} style={{ padding: "8px 16px", ...btnBase }}>Back to Chapters</button>
         </div>
@@ -973,8 +978,12 @@ function Quiz() {
           <h3 style={{ color: "#2e7d32", marginBottom: "15px" }}>Review Mode</h3>
           <p style={{ color: "#555", marginBottom: "15px" }}>You can continue adding notes and highlights to any page before downloading.</p>
           <div style={{ display: "flex", justifyContent: "center", gap: "15px", flexWrap: "wrap" }}>
-            <button onClick={downloadPDF} style={{ ...btnBase, background: "#2196f3", color: "white", fontSize: "1.1rem", padding: "12px 24px", position: "relative", zIndex: 200, pointerEvents: "auto" }}>
-              Download Study Notes (PDF) 📥
+            <button
+              onClick={downloadPDF}
+              disabled={isDownloading}
+              style={{ ...btnBase, background: "#2196f3", color: "white", fontSize: "1.1rem", padding: "12px 24px", position: "relative", zIndex: 200, pointerEvents: "auto", opacity: isDownloading ? 0.7 : 1 }}
+            >
+              {isDownloading ? "Generating PDF... ⏳" : "Download Study Notes (PDF) 📥"}
             </button>
             <button
               onClick={startFreshRetainNotes}
@@ -1136,16 +1145,19 @@ function Quiz() {
               ↪
             </button>
 
-            {/* --- IN-TOOLBAR SAVE BUTTON FOR CONVENIENCE --- */}
-            <div style={tb.sep} />
-            <button
-              onClick={() => { manualSaveToCloud(); setActiveMenu(null); }}
-              style={tb.pill(hasUnsavedChanges, '#ff9800', '#e67e22')}
-              disabled={!hasUnsavedChanges || isSaving}
-              title="Save Annotations"
-            >
-              {isSaving ? '⏳' : '💾'} {hasUnsavedChanges ? 'Save' : 'Saved'}
-            </button>
+            {(isDrawingMode || isHighlightMode) && (
+              <>
+                <div style={tb.sep} />
+                <button
+                  onClick={() => { manualSaveToCloud(); setActiveMenu(null); }}
+                  style={tb.pill(hasUnsavedChanges, '#ff9800', '#e67e22')}
+                  disabled={!hasUnsavedChanges || isSaving}
+                  title="Save Annotations"
+                >
+                  {isSaving ? '⏳' : '💾'} {hasUnsavedChanges ? 'Save' : 'Saved'}
+                </button>
+              </>
+            )}
 
             {isHighlightMode && (
               <>
@@ -1223,7 +1235,7 @@ function Quiz() {
       })()}
 
       <div style={{ display: "flex", gap: "25px", alignItems: "flex-start", marginTop: "20px", justifyContent: "center" }}>
-        <div style={{ width: "750px", maxWidth: "100%", flexShrink: 0, background: "white", minHeight: "400px", borderRadius: "12px", boxShadow: "0 2px 10px rgba(0,0,0,0.05)", border: "1px solid #eee", padding: "0", position: "relative", overflow: "visible" }}>
+        <div id="quiz-review-container" style={{ width: "750px", maxWidth: "100%", flexShrink: 0, background: "white", minHeight: "400px", borderRadius: "12px", boxShadow: "0 2px 10px rgba(0,0,0,0.05)", border: "1px solid #eee", padding: "20px", position: "relative", overflow: "visible" }}>
           {questions.map((q, index) => {
             const showAll = isSubmitted && !isRetakeMode;
             if (!showAll && index !== current) return null;
@@ -1479,36 +1491,6 @@ function Quiz() {
         </div>
       )}
 
-      {/* explicitly added zIndex: "-9999" below to pair with the js revert logic */}
-      <div id="pdf-container" style={{ position: "absolute", left: "-9999px", top: "-9999px", zIndex: "-9999", width: "794px", padding: "40px", background: "white", color: "black", fontFamily: "Arial", boxSizing: "border-box" }}>
-        <h2>{subjName} - {chapterName} (Review)</h2>
-        <hr />
-        {questions.map((q, index) => (
-          <div key={index} style={{ position: "relative", marginBottom: "30px", paddingBottom: "20px" }}>
-
-            {drawings[index] && (
-              <img
-                src={drawings[index]}
-                alt="notes"
-                style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", zIndex: 5, pointerEvents: "none" }}
-              />
-            )}
-
-            <div style={{ position: "relative", zIndex: 1, textAlign: "left" }}>
-              <h3 style={{ marginBottom: "10px", maxWidth: "700px" }}>{index + 1}. {q.question}</h3>
-              {q.options.map((opt, i) => (
-                <p key={i} style={{ margin: "5px 0", padding: "5px", background: i === q.correct ? "#c8e6c9" : "transparent", fontWeight: i === q.correct ? "bold" : "normal", maxWidth: "600px" }}>
-                  {i === q.correct ? "✔ " : "○ "} {opt}
-                </p>
-              ))}
-              <div style={{ marginTop: "10px", padding: "10px", borderLeft: "4px solid #ffeb3b", background: "#fdfbf7", maxWidth: "700px" }}>
-                <strong>Explanation: </strong>
-                <span dangerouslySetInnerHTML={{ __html: savedExplanations[index] || `<span>${q.explanation}</span>` }} />
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
     </div>
   );
 }
