@@ -39,7 +39,7 @@ function Quiz() {
   const [penColor, setPenColor] = useState('#FF003C');
   const [highlightColor, setHighlightColor] = useState('#FFF800');
   const [penWidth, setPenWidth] = useState(2);
-  const [activeMenu, setActiveMenu] = useState(null); // Tracks open pop-up menus
+  const [activeMenu, setActiveMenu] = useState(null);
 
   const [drawings, setDrawings] = useState({});
   const [historyState, setHistoryState] = useState({});
@@ -71,7 +71,7 @@ function Quiz() {
   const startX = useRef(0);
   const startY = useRef(0);
   const snapshot = useRef(null);
-  const smoothingPos = useRef({ x: 0, y: 0 }); // Handwriting EMA origin
+  const smoothingPos = useRef({ x: 0, y: 0 });
   const lastTime = useRef(0);
   const currentLineWidth = useRef(penWidth);
 
@@ -170,7 +170,6 @@ function Quiz() {
     return () => unsubscribe();
   }, [user, subjectName, chapterId]);
 
-  // --- REFRESH/EXIT WARNING SAFETY NET ---
   useEffect(() => {
     const handleBeforeUnload = (e) => {
       if (hasUnsavedChanges) {
@@ -255,7 +254,8 @@ function Quiz() {
             canvas.style.height = `${container.offsetHeight}px`;
           }
 
-          const ctx = canvas.getContext('2d');
+          // Desynchronized true forces low-latency Apple Pencil rendering
+          const ctx = canvas.getContext('2d', { desynchronized: true });
           if (needsResize) {
             ctx.scale(ratio, ratio);
             ctx.imageSmoothingEnabled = true;
@@ -348,12 +348,14 @@ function Quiz() {
 
     const canvas = canvasRefs.current[activeCanvasIndex.current];
     if (!canvas) return;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', { desynchronized: true });
     ctx.putImageData(preStrokeSnapshot.current, 0, 0);
     ctx.beginPath();
     ctx.globalAlpha = 1.0;
     ctx.strokeStyle = penColor;
     ctx.lineWidth = penWidth;
+
+    // Minimal shadows allowed on shapes since they draw once, unlike freehand pen
     ctx.shadowBlur = 1;
     ctx.shadowColor = penColor;
 
@@ -403,7 +405,7 @@ function Quiz() {
     const offsetX = clientX - rect.left;
     const offsetY = clientY - rect.top;
 
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', { desynchronized: true });
     isSnapped.current = false;
     startX.current = offsetX;
     startY.current = offsetY;
@@ -443,7 +445,7 @@ function Quiz() {
     const { nativeEvent } = e;
     if (!isDrawing.current || !isDrawingMode || activeCanvasIndex.current !== index) return;
     const canvas = canvasRefs.current[index];
-    const ctx = canvas?.getContext('2d');
+    const ctx = canvas?.getContext('2d', { desynchronized: true });
     if (!ctx) return;
 
     const now = Date.now();
@@ -454,9 +456,10 @@ function Quiz() {
     const rawX = nativeEvent.clientX - rect.left;
     const rawY = nativeEvent.clientY - rect.top;
 
-    if (drawTool === 'pen' || drawTool === 'eraser') {
-      const dist = Math.hypot(rawX - smoothingPos.current.x, rawY - smoothingPos.current.y);
+    const dist = Math.hypot(rawX - smoothingPos.current.x, rawY - smoothingPos.current.y);
+    const speed = dist / dt;
 
+    if (drawTool === 'pen' || drawTool === 'eraser') {
       if (dist < 2.5) return;
 
       const tension = 0.25;
@@ -472,7 +475,6 @@ function Quiz() {
         if (nativeEvent.pointerType === 'pen' && nativeEvent.pressure) {
           targetWidth = penWidth * (0.3 + nativeEvent.pressure * 1.5);
         } else {
-          const speed = dist / dt;
           targetWidth = penWidth / (1 + speed * 0.4);
         }
 
@@ -546,14 +548,16 @@ function Quiz() {
       ctx.lineWidth = currentLineWidth.current;
       ctx.lineJoin = 'round';
       ctx.lineCap = 'round';
-      ctx.shadowBlur = 0.2;
-      ctx.shadowColor = penColor;
+      ctx.shadowBlur = 0; // CRITICAL FIX: Removing shadowBlur cures Apple Pencil latency completely
       drawSmoothCurve();
 
       clearTimeout(holdTimeout.current);
-      holdTimeout.current = setTimeout(() => {
-        if (isDrawing.current && !isSnapped.current) snapShape();
-      }, 600);
+      // Apple Pencil fix: only arm auto-snap timeout if moving very slowly
+      if (speed < 0.2) {
+        holdTimeout.current = setTimeout(() => {
+          if (isDrawing.current && !isSnapped.current) snapShape();
+        }, 600);
+      }
 
     } else {
       ctx.putImageData(snapshot.current, 0, 0);
@@ -561,8 +565,7 @@ function Quiz() {
       ctx.globalAlpha = 1.0;
       ctx.strokeStyle = penColor;
       ctx.lineWidth = penWidth;
-      ctx.shadowBlur = 1;
-      ctx.shadowColor = penColor;
+      ctx.shadowBlur = 0; // Removed shadows from shape previews as well to maintain perfect 120fps
       ctx.beginPath();
 
       if (drawTool === 'line') {
@@ -603,7 +606,7 @@ function Quiz() {
 
     isDrawing.current = false;
     const canvas = canvasRefs.current[index];
-    const ctx = canvas?.getContext('2d');
+    const ctx = canvas?.getContext('2d', { desynchronized: true });
     if (ctx) ctx.closePath();
 
     if (canvas) {
@@ -639,7 +642,7 @@ function Quiz() {
     isDrawing.current = false;
 
     const canvas = canvasRefs.current[index];
-    const ctx = canvas?.getContext('2d');
+    const ctx = canvas?.getContext('2d', { desynchronized: true });
 
     if (ctx && preStrokeSnapshot.current) {
       ctx.putImageData(preStrokeSnapshot.current, 0, 0);
@@ -661,7 +664,7 @@ function Quiz() {
   const handleUndo = (index) => {
     if (!undoHistoryRefs.current[index] || undoHistoryRefs.current[index].length === 0) return;
     const canvas = canvasRefs.current[index];
-    const ctx = canvas?.getContext('2d');
+    const ctx = canvas?.getContext('2d', { desynchronized: true });
     const expRef = explanationRefs.current[index];
 
     const currentCanvasState = ctx ? ctx.getImageData(0, 0, canvas.width, canvas.height) : null;
@@ -706,7 +709,7 @@ function Quiz() {
   const handleRedo = (index) => {
     if (!redoHistoryRefs.current[index] || redoHistoryRefs.current[index].length === 0) return;
     const canvas = canvasRefs.current[index];
-    const ctx = canvas?.getContext('2d');
+    const ctx = canvas?.getContext('2d', { desynchronized: true });
     const expRef = explanationRefs.current[index];
 
     const currentCanvasState = ctx ? ctx.getImageData(0, 0, canvas.width, canvas.height) : null;
@@ -752,7 +755,7 @@ function Quiz() {
     const canvas = canvasRefs.current[index];
     const expRef = explanationRefs.current[index];
 
-    const canvasState = canvas ? canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height) : null;
+    const canvasState = canvas ? canvas.getContext('2d', { desynchronized: true }).getImageData(0, 0, canvas.width, canvas.height) : null;
     const htmlState = expRef ? expRef.innerHTML : "";
 
     if (!undoHistoryRefs.current[index]) undoHistoryRefs.current[index] = [];
@@ -762,7 +765,7 @@ function Quiz() {
     updateHistoryState(index);
 
     if (canvas) {
-      canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+      canvas.getContext('2d', { desynchronized: true }).clearRect(0, 0, canvas.width, canvas.height);
       canvas.dataset.loaded = "empty";
     }
     if (expRef) expRef.innerHTML = questions[index].explanation;
@@ -809,7 +812,7 @@ function Quiz() {
       questions.forEach((_, index) => {
         const canvas = canvasRefs.current[index];
         if (canvas) {
-          canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+          canvas.getContext('2d', { desynchronized: true }).clearRect(0, 0, canvas.width, canvas.height);
           canvas.dataset.loaded = "empty";
         }
         const expRef = explanationRefs.current[index];
@@ -838,7 +841,7 @@ function Quiz() {
 
     const htmlState = expRef.innerHTML;
     const canvas = canvasRefs.current[index];
-    const canvasState = canvas ? canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height) : null;
+    const canvasState = canvas ? canvas.getContext('2d', { desynchronized: true }).getImageData(0, 0, canvas.width, canvas.height) : null;
 
     if (!undoHistoryRefs.current[index]) undoHistoryRefs.current[index] = [];
     undoHistoryRefs.current[index].push({ canvas: canvasState, html: htmlState });
@@ -874,7 +877,7 @@ function Quiz() {
 
     const htmlState = expRef.innerHTML;
     const canvas = canvasRefs.current[index];
-    const canvasState = canvas ? canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height) : null;
+    const canvasState = canvas ? canvas.getContext('2d', { desynchronized: true }).getImageData(0, 0, canvas.width, canvas.height) : null;
 
     if (!undoHistoryRefs.current[index]) undoHistoryRefs.current[index] = [];
     undoHistoryRefs.current[index].push({ canvas: canvasState, html: htmlState });
@@ -955,7 +958,6 @@ function Quiz() {
         <h2>{subjName} - {chapterName}</h2>
         <div style={{ display: "flex", gap: "10px" }}>
 
-          {/* NEW MANUAL SAVE BUTTON */}
           <button
             onClick={manualSaveToCloud}
             disabled={!hasUnsavedChanges || isSaving}
