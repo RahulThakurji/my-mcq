@@ -2,10 +2,25 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useState, useEffect, useRef } from 'react';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
+import { getStroke } from 'perfect-freehand';
 import { loadQuiz } from '../utils/loadQuiz';
 import { useAuth } from '../context/AuthContext';
 import { doc, setDoc, updateDoc, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
+
+function getSvgPathFromStroke(stroke) {
+  if (!stroke.length) return "";
+  const d = stroke.reduce(
+    (acc, [x0, y0], i, arr) => {
+      const [x1, y1] = arr[(i + 1) % arr.length];
+      acc.push(x0, y0, (x0 + x1) / 2, (y0 + y1) / 2);
+      return acc;
+    },
+    ["M", ...stroke[0], "Q"]
+  );
+  d.push("Z");
+  return d.join(" ");
+}
 
 function Quiz() {
   const { subjectName, chapterId } = useParams();
@@ -77,6 +92,7 @@ function Quiz() {
   const lastPos = useRef({ x: 0, y: 0 });
   const isSnapped = useRef(false);
   const isHighlightErased = useRef(false);
+  const activePointerType = useRef(null);
 
   const updateHistoryState = (index) => {
     setHistoryState(prev => ({
@@ -375,8 +391,12 @@ function Quiz() {
 
     if (activeMenu) setActiveMenu(null);
 
+    // Palm Rejection: If a pen is used, ignore touches
+    if (activePointerType.current === 'pen' && nativeEvent.pointerType === 'touch') return;
+    activePointerType.current = nativeEvent.pointerType;
+
     activeCanvasIndex.current = index;
-    const { clientX, clientY } = nativeEvent;
+    const { clientX, clientY, pressure } = nativeEvent;
 
     const isDrawingAllowed = isRetakeMode ? retakeSubmitted : (isSubmitted || showExp[index]);
     if (!isDrawingAllowed) return;
@@ -406,7 +426,7 @@ function Quiz() {
     if (undoHistoryRefs.current[index].length > 20) undoHistoryRefs.current[index].shift();
 
     redoHistoryRefs.current[index] = [];
-    strokePoints.current = [{ x: offsetX, y: offsetY }];
+    strokePoints.current = [{ x: offsetX, y: offsetY, pressure: pressure || 0.5 }];
     isDrawing.current = true;
     updateHistoryState(index);
 
@@ -425,23 +445,45 @@ function Quiz() {
     const offsetX = nativeEvent.clientX - rect.left;
     const offsetY = nativeEvent.clientY - rect.top;
 
-    strokePoints.current.push({ x: offsetX, y: offsetY });
+    strokePoints.current.push({ x: offsetX, y: offsetY, pressure: nativeEvent.pressure || 0.5 });
     const pts = strokePoints.current;
 
     const drawSmoothCurve = () => {
-      if (pts.length >= 3) {
-        const prev = pts[pts.length - 3];
-        const mid1 = { x: (prev.x + pts[pts.length - 2].x) / 2, y: (prev.y + pts[pts.length - 2].y) / 2 };
-        const mid2 = { x: (pts[pts.length - 2].x + offsetX) / 2, y: (pts[pts.length - 2].y + offsetY) / 2 };
-        ctx.beginPath();
-        ctx.moveTo(mid1.x, mid1.y);
-        ctx.quadraticCurveTo(pts[pts.length - 2].x, pts[pts.length - 2].y, mid2.x, mid2.y);
-        ctx.stroke();
+      if (drawTool === 'pen') {
+        // Advanced Smoothing with perfect-freehand
+        if (preStrokeSnapshot.current) {
+          ctx.putImageData(preStrokeSnapshot.current, 0, 0);
+        }
+        
+        const stroke = getStroke(pts, {
+          size: penWidth,
+          thinning: 0.6,
+          smoothing: 0.5,
+          streamline: 0.5,
+          simulatePressure: nativeEvent.pointerType !== 'pen' // Only simulate if not using a real pen
+        });
+
+        const pathData = getSvgPathFromStroke(stroke);
+        const path = new Path2D(pathData);
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.fillStyle = penColor;
+        ctx.fill(path);
       } else {
-        ctx.beginPath();
-        ctx.moveTo(pts[0].x, pts[0].y);
-        ctx.lineTo(offsetX, offsetY);
-        ctx.stroke();
+        // Legacy smooth curve for other tools if needed (though mostly pen uses this)
+        if (pts.length >= 3) {
+          const prev = pts[pts.length - 3];
+          const mid1 = { x: (prev.x + pts[pts.length - 2].x) / 2, y: (prev.y + pts[pts.length - 2].y) / 2 };
+          const mid2 = { x: (pts[pts.length - 2].x + offsetX) / 2, y: (pts[pts.length - 2].y + offsetY) / 2 };
+          ctx.beginPath();
+          ctx.moveTo(mid1.x, mid1.y);
+          ctx.quadraticCurveTo(pts[pts.length - 2].x, pts[pts.length - 2].y, mid2.x, mid2.y);
+          ctx.stroke();
+        } else {
+          ctx.beginPath();
+          ctx.moveTo(pts[0].x, pts[0].y);
+          ctx.lineTo(offsetX, offsetY);
+          ctx.stroke();
+        }
       }
     };
 
