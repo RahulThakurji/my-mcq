@@ -1516,20 +1516,22 @@ function Quiz() {
                   </div>
                 )}
                 {!isRetakeMode && (
-                  <canvas
-                    ref={el => canvasRefs.current[index] = el}
-                    style={{
-                      position: "absolute", top: 0, left: 0, zIndex: 9999,
-                      opacity: (isSubmitted || showExp[index]) ? 1 : 0, pointerEvents: "none", touchAction: "none"
-                    }}
-                  />
-                  <canvas
-                    ref={el => previewCanvasRefs.current[index] = el}
-                    style={{
-                      position: "absolute", top: 0, left: 0, zIndex: 10000,
-                      opacity: (isSubmitted || showExp[index]) ? 1 : 0, pointerEvents: "none", touchAction: "none"
-                    }}
-                  />
+                  <>
+                    <canvas
+                      ref={el => canvasRefs.current[index] = el}
+                      style={{
+                        position: "absolute", top: 0, left: 0, zIndex: 9999,
+                        opacity: (isSubmitted || showExp[index]) ? 1 : 0, pointerEvents: "none", touchAction: "none"
+                      }}
+                    />
+                    <canvas
+                      ref={el => previewCanvasRefs.current[index] = el}
+                      style={{
+                        position: "absolute", top: 0, left: 0, zIndex: 10000,
+                        opacity: (isSubmitted || showExp[index]) ? 1 : 0, pointerEvents: "none", touchAction: "none"
+                      }}
+                    />
+                  </>
                 )}
               </div>
             );
