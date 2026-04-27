@@ -73,6 +73,7 @@ function Quiz() {
 
   const activePointers = useRef(new Set());
   const canvasRefs = useRef({});
+  const previewCanvasRefs = useRef({});
   const undoHistoryRefs = useRef({});
   const redoHistoryRefs = useRef({});
   const questionContainersRef = useRef({});
@@ -430,6 +431,22 @@ function Quiz() {
     isDrawing.current = true;
     updateHistoryState(index);
 
+    // Prepare Preview Canvas
+    const previewCanvas = previewCanvasRefs.current[index];
+    if (previewCanvas) {
+      const ratio = window.devicePixelRatio || 1;
+      if (previewCanvas.width !== canvas.width || previewCanvas.height !== canvas.height) {
+        previewCanvas.width = canvas.width;
+        previewCanvas.height = canvas.height;
+        previewCanvas.style.width = canvas.style.width;
+        previewCanvas.style.height = canvas.style.height;
+      }
+      const pCtx = previewCanvas.getContext('2d');
+      pCtx.setTransform(1, 0, 0, 1, 0, 0);
+      pCtx.scale(ratio, ratio);
+      pCtx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+
     ctx.beginPath();
     ctx.moveTo(offsetX, offsetY);
   };
@@ -449,27 +466,28 @@ function Quiz() {
     const pts = strokePoints.current;
 
     const drawSmoothCurve = () => {
-      if (drawTool === 'pen') {
-        // Advanced Smoothing with perfect-freehand
-        if (preStrokeSnapshot.current) {
-          ctx.putImageData(preStrokeSnapshot.current, 0, 0);
-        }
+      const previewCanvas = previewCanvasRefs.current[index];
+      const pCtx = previewCanvas?.getContext('2d');
+
+      if (drawTool === 'pen' && pCtx) {
+        // Advanced Smoothing with perfect-freehand on the PREVIEW layer
+        pCtx.clearRect(0, 0, canvas.width, canvas.height);
         
         const stroke = getStroke(pts, {
           size: penWidth,
           thinning: 0.6,
           smoothing: 0.5,
           streamline: 0.5,
-          simulatePressure: nativeEvent.pointerType !== 'pen' // Only simulate if not using a real pen
+          simulatePressure: nativeEvent.pointerType !== 'pen'
         });
 
         const pathData = getSvgPathFromStroke(stroke);
         const path = new Path2D(pathData);
-        ctx.globalCompositeOperation = 'source-over';
-        ctx.fillStyle = penColor;
-        ctx.fill(path);
+        pCtx.globalCompositeOperation = 'source-over';
+        pCtx.fillStyle = penColor;
+        pCtx.fill(path);
       } else {
-        // Legacy smooth curve for other tools if needed (though mostly pen uses this)
+        // Fallback or other tools on main ctx (or preview if appropriate)
         if (pts.length >= 3) {
           const prev = pts[pts.length - 3];
           const mid1 = { x: (prev.x + pts[pts.length - 2].x) / 2, y: (prev.y + pts[pts.length - 2].y) / 2 };
@@ -585,8 +603,18 @@ function Quiz() {
 
     isDrawing.current = false;
     const canvas = canvasRefs.current[index];
+    const previewCanvas = previewCanvasRefs.current[index];
     const ctx = canvas?.getContext('2d');
     if (ctx) ctx.closePath();
+
+    if (previewCanvas && canvas && drawTool === 'pen') {
+      // Bake the preview stroke into the main canvas
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(previewCanvas, 0, 0, canvas.width / (window.devicePixelRatio || 1), canvas.height / (window.devicePixelRatio || 1));
+      // Clear preview
+      const pCtx = previewCanvas.getContext('2d');
+      pCtx.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
+    }
 
     if (canvas) {
       const newDrawUrl = canvas.toDataURL();
@@ -1492,6 +1520,13 @@ function Quiz() {
                     ref={el => canvasRefs.current[index] = el}
                     style={{
                       position: "absolute", top: 0, left: 0, zIndex: 9999,
+                      opacity: (isSubmitted || showExp[index]) ? 1 : 0, pointerEvents: "none", touchAction: "none"
+                    }}
+                  />
+                  <canvas
+                    ref={el => previewCanvasRefs.current[index] = el}
+                    style={{
+                      position: "absolute", top: 0, left: 0, zIndex: 10000,
                       opacity: (isSubmitted || showExp[index]) ? 1 : 0, pointerEvents: "none", touchAction: "none"
                     }}
                   />
