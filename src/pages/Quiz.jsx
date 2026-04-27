@@ -847,47 +847,45 @@ function Quiz() {
   const downloadPDF = async () => {
     setIsDownloading(true);
     try {
-      const pdf = new jsPDF('p', 'mm', 'a4', true); // Enable compression
+      const pdf = new jsPDF('p', 'mm', 'a4');
       const margin = 10;
       const pdfWidth = pdf.internal.pageSize.getWidth();
       const pdfHeight = pdf.internal.pageSize.getHeight();
       const contentWidth = pdfWidth - (margin * 2);
       let currentY = margin;
 
-      const BATCH_SIZE = 5; // Process 5 questions at once
+      // 1. Force drawings visibility
+      questions.forEach((_, i) => {
+        if (canvasRefs.current[i]) canvasRefs.current[i].style.opacity = "1";
+      });
+
+      // 2. Process in batches for balanced speed and stability
+      const BATCH_SIZE = 8; 
 
       for (let i = 0; i < questions.length; i += BATCH_SIZE) {
-        // 1. Create a batch of promises to run in parallel
         const batchPromises = questions.slice(i, i + BATCH_SIZE).map(async (_, index) => {
           const qIdx = i + index;
           const el = questionContainersRef.current[qIdx];
           if (!el) return null;
 
-          // Force drawing visibility for the capture
-          const drawingCanvas = canvasRefs.current[qIdx];
-          if (drawingCanvas) drawingCanvas.style.opacity = "1";
-
           const canvas = await html2canvas(el, {
-            scale: 1.3, // Optimized scale: fast but still legible
+            scale: 2, // Maintain ultra-sharp resolution
             useCORS: true,
-            backgroundColor: "#ffffff",
             logging: false,
-            imageTimeout: 0,
+            backgroundColor: "#ffffff",
           });
 
-          // Convert to highly compressed JPEG immediately
-          const imgData = canvas.toDataURL("image/jpeg", 0.6);
-          const imgHeight = (canvas.height * contentWidth) / canvas.width;
-
-          return { imgData, imgHeight };
+          return {
+            imgData: canvas.toDataURL("image/jpeg", 0.95), // JPEG 0.95 is much faster than PNG
+            imgHeight: (canvas.height * contentWidth) / canvas.width
+          };
         });
 
-        // 2. Wait for the entire batch to finish capturing
         const results = await Promise.all(batchPromises);
 
-        // 3. Add batch results to PDF sequentially to maintain order
-        results.forEach((res) => {
-          if (!res) return;
+        // Add results to PDF while managing page breaks
+        for (const res of results) {
+          if (!res) continue;
           const { imgData, imgHeight } = res;
 
           if (currentY + imgHeight > pdfHeight - margin) {
@@ -896,14 +894,41 @@ function Quiz() {
           }
 
           pdf.addImage(imgData, 'JPEG', margin, currentY, contentWidth, imgHeight, undefined, 'FAST');
-          currentY += imgHeight + 6;
-        });
+          currentY += imgHeight + 6; // Spacing between questions
+        }
       }
 
-      pdf.save(`${subjName}_Master_Notes.pdf`);
+      pdf.save(`${subjName}_Study_Notes.pdf`);
     } catch (error) {
-      console.error("PDF Speed Mode Error:", error);
-      alert("Generation failed. Try a smaller batch size in the code.");
+      console.error("PDF Generation Error:", error);
+      alert("PDF generation failed. This usually happens if the quiz is extremely long. Your notes are safe, but the PDF export limit was reached.");
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
+  const downloadCurrentQuestion = async () => {
+    const el = questionContainersRef.current[current];
+    if (!el) return;
+
+    setIsDownloading(true);
+    try {
+      const drawingCanvas = canvasRefs.current[current];
+      if (drawingCanvas) drawingCanvas.style.opacity = "1";
+
+      const canvas = await html2canvas(el, {
+        scale: 1.5,
+        useCORS: true,
+        backgroundColor: "#ffffff",
+      });
+
+      const imgData = canvas.toDataURL("image/png");
+      const link = document.createElement('a');
+      link.download = `${subjName}_Q${current + 1}_Notes.png`;
+      link.href = imgData;
+      link.click();
+    } catch (error) {
+      console.error("Image Download Error:", error);
     } finally {
       setIsDownloading(false);
     }
@@ -1224,9 +1249,37 @@ function Quiz() {
               </>
             )}
 
+            {isSubmitted && !isRetakeMode && (
+              <div style={{ position: 'relative', display: 'flex', gap: '4px', marginLeft: 'auto' }}>
+                <button
+                  onClick={() => setActiveMenu(activeMenu === 'download' ? null : 'download')}
+                  disabled={isDownloading}
+                  style={tb.pill(true, '#2196f3', '#1976d2')}
+                >
+                  {isDownloading ? "⏳..." : "📥 Download"} ▼
+                </button>
+                {activeMenu === 'download' && (
+                  <div style={{ ...popoverStyle, width: '180px', flexDirection: 'column', alignItems: 'stretch' }}>
+                    <button
+                      onClick={() => { downloadCurrentQuestion(); setActiveMenu(null); }}
+                      style={{ ...tb.toolBtn(false), justifyContent: 'flex-start', padding: '10px' }}
+                    >
+                      🖼️ Current Question (PNG)
+                    </button>
+                    <button
+                      onClick={() => { downloadPDF(); setActiveMenu(null); }}
+                      style={{ ...tb.toolBtn(false), justifyContent: 'flex-start', padding: '10px' }}
+                    >
+                      📄 Full Study Notes (PDF)
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
             {!isSubmitted && hasEditsOnPage && (
               <button onClick={() => { clearPage(current); setActiveMenu(null); }}
-                style={{ ...tb.pill(false, '#ff4757', '#c0392b'), marginLeft: "auto", color: "#ffbaba", background: "rgba(255,71,87,0.15)", border: "1px solid rgba(255,71,87,0.4)" }}>
+                style={{ ...tb.pill(false, '#ff4757', '#c0392b'), marginLeft: isSubmitted ? "8px" : "auto", color: "#ffbaba", background: "rgba(255,71,87,0.15)", border: "1px solid rgba(255,71,87,0.4)" }}>
                 Clear Page
               </button>
             )}
@@ -1455,7 +1508,7 @@ function Quiz() {
           </div>
 
           {/* --- SUBMIT BUTTON INSIDE THE PALETTE --- */}
-          {(!isRetakeMode || !retakeSubmitted) && (
+          {!isSubmitted && (!isRetakeMode || !retakeSubmitted) && (
             <button
               onClick={() => {
                 if (window.confirm("⚠️ Warning: Are you sure you want to submit? You won't be able to change your answers!")) {
