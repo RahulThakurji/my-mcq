@@ -255,8 +255,8 @@ function Quiz() {
 
       if (canvas && container) {
         const ratio = window.devicePixelRatio || 1;
-        const targetWidth = container.offsetWidth * ratio;
-        const targetHeight = container.offsetHeight * ratio;
+        const targetWidth = Math.round(container.offsetWidth * ratio);
+        const targetHeight = Math.round(container.offsetHeight * ratio);
 
         const needsResize = canvas.width !== targetWidth || canvas.height !== targetHeight;
 
@@ -268,7 +268,8 @@ function Quiz() {
             canvas.style.height = `${container.offsetHeight}px`;
           }
 
-          const ctx = canvas.getContext('2d');
+          const ctx = canvas.getContext('2d', { alpha: true });
+          ctx.imageSmoothingEnabled = false; // Disable blurring for ultra-sharp lines
           if (needsResize) ctx.scale(ratio, ratio);
           ctx.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -276,6 +277,8 @@ function Quiz() {
             const img = new Image();
             img.src = drawings[index];
             img.onload = () => {
+              const ctx = canvas.getContext('2d');
+              ctx.imageSmoothingEnabled = false;
               ctx.drawImage(img, 0, 0, container.offsetWidth, container.offsetHeight);
             };
             canvas.dataset.loaded = drawings[index];
@@ -441,7 +444,8 @@ function Quiz() {
         previewCanvas.style.width = canvas.style.width;
         previewCanvas.style.height = canvas.style.height;
       }
-      const pCtx = previewCanvas.getContext('2d');
+      const pCtx = previewCanvas.getContext('2d', { alpha: true });
+      pCtx.imageSmoothingEnabled = false; // Maintain sharpness during live drawing
       pCtx.setTransform(1, 0, 0, 1, 0, 0);
       pCtx.scale(ratio, ratio);
       pCtx.clearRect(0, 0, canvas.width, canvas.height);
@@ -610,6 +614,7 @@ function Quiz() {
     if (previewCanvas && canvas && drawTool === 'pen') {
       // Bake the preview stroke into the main canvas
       const ctx = canvas.getContext('2d');
+      ctx.imageSmoothingEnabled = false; // Prevent blurring when merging layers
       ctx.drawImage(previewCanvas, 0, 0, canvas.width / (window.devicePixelRatio || 1), canvas.height / (window.devicePixelRatio || 1));
       // Clear preview
       const pCtx = previewCanvas.getContext('2d');
