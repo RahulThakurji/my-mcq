@@ -476,15 +476,15 @@ function Quiz() {
       if (drawTool === 'pen' && pCtx) {
         // Advanced Smoothing with perfect-freehand on the PREVIEW layer
         pCtx.clearRect(0, 0, canvas.width, canvas.height);
-        
+
         const stroke = getStroke(pts, {
           size: penWidth,
-          thinning: 0.6,
-          
+          thinning: 0.8,
+
           // INCREASE THESE TWO VALUES:
           smoothing: 0.8,   // Previously 0.5. Try 0.8 to 0.95
-          streamline: 0.85, // Previously 0.5. Try 0.8 to 0.95
-          
+          streamline: 0.9, // Previously 0.5. Try 0.8 to 0.95
+
           simulatePressure: nativeEvent.pointerType !== 'pen'
         });
 
@@ -938,7 +938,7 @@ function Quiz() {
       });
 
       // 2. Process in batches for balanced speed and stability
-      const BATCH_SIZE = 8; 
+      const BATCH_SIZE = 8;
 
       for (let i = 0; i < questions.length; i += BATCH_SIZE) {
         const batchPromises = questions.slice(i, i + BATCH_SIZE).map(async (_, index) => {
