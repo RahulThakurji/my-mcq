@@ -1,6 +1,8 @@
 import React from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { historicalBackground } from '../data/ebooks/polity/historicalBackground';
+import LatexRenderer from '../components/LatexRenderer';
+
 
 function EbookReader() {
   const { ebookId, chapterId } = useParams();
@@ -12,11 +14,12 @@ function EbookReader() {
   const renderContent = (item, index) => {
     switch (item.type) {
       case 'h2':
-        return <h2 key={index} style={{ color: '#1a237e', marginTop: '2rem', borderBottom: '2px solid #eee', paddingBottom: '0.5rem' }}>{item.text}</h2>;
+        return <h2 key={index} style={{ color: '#1a237e', marginTop: '2rem', borderBottom: '2px solid #eee', paddingBottom: '0.5rem' }}><LatexRenderer>{item.text}</LatexRenderer></h2>;
       case 'h3':
-        return <h3 key={index} style={{ color: '#283593', marginTop: '1.5rem' }}>{item.text}</h3>;
+        return <h3 key={index} style={{ color: '#283593', marginTop: '1.5rem' }}><LatexRenderer>{item.text}</LatexRenderer></h3>;
       case 'p':
-        return <p key={index} style={{ lineHeight: '1.8', color: '#333', marginBottom: '1.2rem', textAlign: 'justify' }}>{item.text}</p>;
+        return <p key={index} style={{ lineHeight: '1.8', color: '#333', marginBottom: '1.2rem', textAlign: 'justify' }}><LatexRenderer>{item.text}</LatexRenderer></p>;
+
       case 'list':
         return (
           <ul key={index} style={{ marginBottom: '1.5rem', paddingLeft: '1.5rem' }}>

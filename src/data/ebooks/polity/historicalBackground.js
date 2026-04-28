@@ -81,6 +81,14 @@ export const historicalBackground = {
         "It ended the system of double government by abolishing the Board of Control and Court of Directors.",
         "It created a new office, Secretary of State for India, vested with complete authority and control over Indian administration."
       ]
+    },
+    {
+      type: "h2",
+      text: "Quick Note on Voting Calculations (Example LaTeX)"
+    },
+    {
+      type: "p",
+      text: "In future chapters, we will discuss voting majorities. For example, a special majority can be represented as: $$\\frac{2}{3} \\times \\text{Members present and voting}$$ This demonstrates our new LaTeX support!"
     }
   ]
 };

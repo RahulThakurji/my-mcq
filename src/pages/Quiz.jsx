@@ -7,6 +7,8 @@ import { loadQuiz } from '../utils/loadQuiz';
 import { useAuth } from '../context/AuthContext';
 import { doc, setDoc, updateDoc, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
+import LatexRenderer from '../components/LatexRenderer';
+
 
 function getSvgPathFromStroke(stroke) {
   if (!stroke.length) return "";
@@ -1453,8 +1455,9 @@ function Quiz() {
                     {index + 1}.
                   </span>
                   <span style={{ fontSize: '1.2rem', fontWeight: 'bold' }}>
-                    {q.question}
+                    <LatexRenderer>{q.question}</LatexRenderer>
                   </span>
+
                 </div>
 
                 {q.options.map((opt, i) => {
@@ -1504,7 +1507,8 @@ function Quiz() {
                         pointerEvents: isDrawingMode ? "none" : "auto", fontSize: "1rem"
                       }}
                     >
-                      {opt}
+                    <LatexRenderer>{opt}</LatexRenderer>
+
                     </button>
                   );
                 })}
