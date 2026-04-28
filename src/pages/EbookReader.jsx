@@ -35,8 +35,8 @@ function EbookReader() {
   const [penWidth, setPenWidth] = useState(3);
   const [activeMenu, setActiveMenu] = useState(null);
   const [eraserMode, setEraserMode] = useState('precision');
-  const [drawingData, setDrawingData] = useState(null); // Single drawing for the whole page
-  const [savedContent, setSavedContent] = useState({}); // Highlights still need to be segmented for precision
+  const [drawingData, setDrawingData] = useState(null);
+  const [savedContent, setSavedContent] = useState({});
   const [isInitialLoadComplete, setIsInitialLoadComplete] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
@@ -126,6 +126,47 @@ function EbookReader() {
       pendingUpdatesRef.current = { ...updatesToApply, ...pendingUpdatesRef.current };
       setHasUnsavedChanges(true);
     } finally { setIsSaving(false); }
+  };
+
+  // --- Shape Snapping ---
+  const snapShape = () => {
+    const points = strokePoints.current;
+    if (points.length < 15) return;
+    const start = points[0]; const end = points[points.length - 1];
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (let p of points) { minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x); minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y); }
+    const width = maxX - minX; const height = maxY - minY;
+    const diag = Math.hypot(width, height); const gap = Math.hypot(start.x - end.x, start.y - end.y);
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    ctx.putImageData(preStrokeSnapshot.current, 0, 0);
+    ctx.beginPath(); ctx.globalAlpha = 1.0; ctx.strokeStyle = penColor; ctx.lineWidth = penWidth; ctx.shadowBlur = 1; ctx.shadowColor = penColor;
+    if (gap < diag * 0.3) {
+      if (Math.min(width, height) / Math.max(width, height) > 0.7) { ctx.arc(minX + width/2, minY + height/2, Math.max(width, height)/2, 0, Math.PI*2); }
+      else { ctx.rect(minX, minY, width, height); }
+    } else { ctx.moveTo(start.x, start.y); ctx.lineTo(end.x, end.y); }
+    ctx.stroke(); isSnapped.current = true;
+  };
+
+  // --- Highlighter Logic ---
+  const handleMouseUp = (index) => {
+    if (!isHighlightMode) return;
+    const selection = window.getSelection();
+    if (!selection.rangeCount || selection.isCollapsed) return;
+    const range = selection.getRangeAt(0);
+    const textRef = textRefs.current[index];
+    if (!textRef || !textRef.contains(range.commonAncestorContainer)) return;
+    const span = document.createElement('span');
+    span.style.backgroundColor = highlightColor; span.style.borderRadius = '3px';
+    try { range.surroundContents(span); } catch { return; }
+    selection.removeAllRanges();
+    const nextSavedContent = { ...savedContent, [index]: textRef.innerHTML };
+    setSavedContent(nextSavedContent); queueUpdate({ savedContent: nextSavedContent });
+  };
+
+  const clearHighlight = (index) => {
+    setSavedContent(prev => { const next = { ...prev }; delete next[index]; queueUpdate({ savedContent: next }); return next; });
   };
 
   // --- Drawing Logic ---
@@ -247,26 +288,6 @@ function EbookReader() {
     setDrawingData(url); queueUpdate({ drawingData: url, savedContent: JSON.parse(prevState.html || '{}') });
   };
 
-  // --- Highlighter ---
-  const handleMouseUp = (index) => {
-    if (!isHighlightMode) return;
-    const selection = window.getSelection();
-    if (!selection.rangeCount || selection.isCollapsed) return;
-    const range = selection.getRangeAt(0);
-    const textRef = textRefs.current[index];
-    if (!textRef || !textRef.contains(range.commonAncestorContainer)) return;
-    const span = document.createElement('span');
-    span.style.backgroundColor = highlightColor; span.style.borderRadius = '3px';
-    try { range.surroundContents(span); } catch { return; }
-    selection.removeAllRanges();
-    const nextSavedContent = { ...savedContent, [index]: textRef.innerHTML };
-    setSavedContent(nextSavedContent); queueUpdate({ savedContent: nextSavedContent });
-  };
-
-  const clearHighlight = (index) => {
-    setSavedContent(prev => { const next = { ...prev }; delete next[index]; queueUpdate({ savedContent: next }); return next; });
-  };
-
   // --- Auto-loader & Resize ---
   useEffect(() => {
     if (!isInitialLoadComplete || !contentAreaRef.current) return;
@@ -297,12 +318,15 @@ function EbookReader() {
   const chapterData = getContent();
 
   const renderContent = (item, index) => {
-    const contentHtml = savedContent[index] || `<span>${(item.type === 'list' ? `<ul>${item.items.map(li => `<li>${li}</li>`).join('')}</ul>` : item.text)}</span>`;
+    // PREPARE CONTENT FOR LATEX RENDERER
+    const contentText = savedContent[index] || (item.type === 'list' ? `${item.items.map(li => `• ${li}`).join('\n')}` : item.text);
+    
     let finalContent;
-    if (item.type === 'h2') finalContent = <h2 style={{ color: '#1a237e', marginTop: '2rem', borderBottom: '2px solid #eee', paddingBottom: '0.5rem' }} dangerouslySetInnerHTML={{ __html: contentHtml }} />;
-    else if (item.type === 'h3') finalContent = <h3 style={{ color: '#283593', marginTop: '1.5rem' }} dangerouslySetInnerHTML={{ __html: contentHtml }} />;
-    else if (item.type === 'p') finalContent = <p style={{ lineHeight: '1.8', color: '#333', marginBottom: '1.2rem', textAlign: 'justify' }} dangerouslySetInnerHTML={{ __html: contentHtml }} />;
-    else if (item.type === 'list') finalContent = <div style={{ marginBottom: '1.5rem', paddingLeft: '1.5rem' }} dangerouslySetInnerHTML={{ __html: contentHtml }} />;
+    if (item.type === 'h2') finalContent = <h2 style={{ color: '#1a237e', marginTop: '2rem', borderBottom: '2px solid #eee', paddingBottom: '0.5rem' }}><LatexRenderer>{contentText}</LatexRenderer></h2>;
+    else if (item.type === 'h3') finalContent = <h3 style={{ color: '#283593', marginTop: '1.5rem' }}><LatexRenderer>{contentText}</LatexRenderer></h3>;
+    else if (item.type === 'p') finalContent = <p style={{ lineHeight: '1.8', color: '#333', marginBottom: '1.2rem', textAlign: 'justify' }}><LatexRenderer>{contentText}</LatexRenderer></p>;
+    else if (item.type === 'list') finalContent = <div style={{ marginBottom: '1.5rem', paddingLeft: '1.5rem', lineHeight: '1.8', color: '#444' }}><LatexRenderer>{contentText}</LatexRenderer></div>;
+    
     return <div key={index} ref={el => textRefs.current[index] = el} onPointerUp={() => handleMouseUp(index)} style={{ position: 'relative', zIndex: 1, userSelect: isHighlightMode ? 'text' : 'none' }}>{finalContent}</div>;
   };
 

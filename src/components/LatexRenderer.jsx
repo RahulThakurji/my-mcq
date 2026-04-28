@@ -30,7 +30,7 @@ const LatexRenderer = ({ children }) => {
                 const formula = part.substring(1, part.length - 1);
                 return <InlineMath key={iIdx} math={formula} />;
               }
-              return part;
+              return <span key={iIdx} dangerouslySetInnerHTML={{ __html: part }} />;
             })}
           </span>
         );
