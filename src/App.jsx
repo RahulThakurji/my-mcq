@@ -1,4 +1,5 @@
 import { Routes, Route } from 'react-router-dom';
+import 'katex/dist/katex.min.css';
 import Navbar from './components/Navbar';
 import Home from './pages/Home';
 import Courses from './pages/Courses';
