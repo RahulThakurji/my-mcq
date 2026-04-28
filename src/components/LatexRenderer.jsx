@@ -1,39 +1,54 @@
 import React from 'react';
-import { InlineMath, BlockMath } from 'react-katex';
+import katex from 'katex';
 import 'katex/dist/katex.min.css';
 
 /**
- * Renders text with LaTeX support.
- * Text inside $...$ is rendered as inline math.
- * Text inside $$...$$ is rendered as block math.
+ * Industrial-strength LaTeX Renderer using the core KaTeX library.
+ * This approach is more reliable than react-katex wrappers in React 19.
  */
 const LatexRenderer = ({ children }) => {
   if (typeof children !== 'string') return children;
 
-  // Split by block math first
-  const blocks = children.split(/(\$\$.*?\$\$)/g);
-
+  // Split by math delimiters, preserving the delimiters in the resulting array
+  const segments = children.split(/(\$\$[\s\S]+?\$\$|\$[\s\S]+?\$)/g);
+  
   return (
     <>
-      {blocks.map((block, bIdx) => {
-        if (block.startsWith('$$') && block.endsWith('$$')) {
-          const formula = block.substring(2, block.length - 2);
-          return <BlockMath key={bIdx} math={formula} />;
+      {segments.map((segment, index) => {
+        if (!segment) return null;
+
+        // Block Math match ($$...$$)
+        if (segment.startsWith('$$') && segment.endsWith('$$')) {
+          const formula = segment.slice(2, -2).trim();
+          try {
+            const html = katex.renderToString(formula, {
+              displayMode: true,
+              throwOnError: false
+            });
+            return <div key={index} dangerouslySetInnerHTML={{ __html: html }} />;
+          } catch (e) {
+            console.error("KaTeX Block Error:", e);
+            return <code key={index}>{segment}</code>;
+          }
         }
 
-        // Handle inline math within the block
-        const inlines = block.split(/(\$.*?\$)/g);
-        return (
-          <span key={bIdx}>
-            {inlines.map((part, iIdx) => {
-              if (part.startsWith('$') && part.endsWith('$')) {
-                const formula = part.substring(1, part.length - 1);
-                return <InlineMath key={iIdx} math={formula} />;
-              }
-              return <span key={iIdx} dangerouslySetInnerHTML={{ __html: part }} />;
-            })}
-          </span>
-        );
+        // Inline Math match ($...$)
+        if (segment.startsWith('$') && segment.endsWith('$')) {
+          const formula = segment.slice(1, -1).trim();
+          try {
+            const html = katex.renderToString(formula, {
+              displayMode: false,
+              throwOnError: false
+            });
+            return <span key={index} dangerouslySetInnerHTML={{ __html: html }} />;
+          } catch (e) {
+            console.error("KaTeX Inline Error:", e);
+            return <span key={index}><code>{segment}</code></span>;
+          }
+        }
+
+        // Plain text or HTML content (like highlights)
+        return <span key={index} dangerouslySetInnerHTML={{ __html: segment }} />;
       })}
     </>
   );
