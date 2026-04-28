@@ -479,11 +479,11 @@ function Quiz() {
 
         const stroke = getStroke(pts, {
           size: penWidth,
-          thinning: 0.8,
+          thinning: 0.6,
 
           // INCREASE THESE TWO VALUES:
           smoothing: 0.8,   // Previously 0.5. Try 0.8 to 0.95
-          streamline: 0.4, // Previously 0.5. Try 0.8 to 0.95
+          streamline: 0.6, // Previously 0.5. Try 0.8 to 0.95
 
           simulatePressure: nativeEvent.pointerType !== 'pen'
         });
