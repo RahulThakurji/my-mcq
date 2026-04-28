@@ -59,6 +59,7 @@ function Quiz() {
 
   const [drawings, setDrawings] = useState({});
   const [historyState, setHistoryState] = useState({});
+  const [eraserMode, setEraserMode] = useState('precision'); // 'precision' or 'stroke'
 
   // --- DYNAMIC ZOOM-RESILIENT TOOLBAR STATE ---
   const [toolbarStyle, setToolbarStyle] = useState({
@@ -513,6 +514,11 @@ function Quiz() {
     };
 
     if (drawTool === 'eraser') {
+      if (eraserMode === 'stroke') {
+        clearPage(index);
+        isDrawing.current = false;
+        return;
+      }
       ctx.globalCompositeOperation = 'destination-out';
       ctx.lineWidth = 25;
       ctx.lineJoin = 'round';
@@ -1222,12 +1228,27 @@ function Quiz() {
               🖍️ Highlighter
             </button>
 
-            <button onClick={() => {
-              if (isDrawingMode && drawTool === 'eraser') { setIsDrawingMode(false); setActiveMenu(null); }
-              else { setIsDrawingMode(true); setIsHighlightMode(false); setDrawTool('eraser'); setActiveMenu(null); }
-            }} style={tb.pill(isDrawingMode && drawTool === 'eraser', '#ff4757', '#c0392b')}>
-              🧽 Eraser
-            </button>
+            <div style={{ position: 'relative' }}>
+              <button onClick={() => {
+                if (isDrawingMode && drawTool === 'eraser') {
+                  setActiveMenu(activeMenu === 'eraser' ? null : 'eraser');
+                }
+                else {
+                  setIsDrawingMode(true);
+                  setIsHighlightMode(false);
+                  setDrawTool('eraser');
+                  setActiveMenu(null);
+                }
+              }} style={tb.pill(isDrawingMode && drawTool === 'eraser', '#ff4757', '#c0392b')}>
+                🧽 {eraserMode === 'precision' ? 'Precision' : 'Stroke'} Eraser ▼
+              </button>
+              {activeMenu === 'eraser' && (
+                <div style={popoverStyle}>
+                  <button onClick={() => { setEraserMode('precision'); setDrawTool('eraser'); setActiveMenu(null); }} style={tb.toolBtn(eraserMode === 'precision')}>🎯 Precision Eraser</button>
+                  <button onClick={() => { setEraserMode('stroke'); setDrawTool('eraser'); setActiveMenu(null); }} style={tb.toolBtn(eraserMode === 'stroke')}>🌊 Stroke Eraser</button>
+                </div>
+              )}
+            </div>
 
             <div style={tb.sep} />
 
