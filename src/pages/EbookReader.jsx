@@ -67,7 +67,7 @@ function EbookReader() {
         if (data.savedContent !== undefined) setSavedContent(data.savedContent);
       } else if (!docSnap.exists()) {
         setSavedContent({});
-        setDoc(docRef, { savedContent: {} }).catch(() => {});
+        setDoc(docRef, { savedContent: {} }).catch(() => { });
       }
       setIsInitialLoadComplete(true);
     }, () => setIsInitialLoadComplete(true));
@@ -103,7 +103,7 @@ function EbookReader() {
     const range = selection.getRangeAt(0);
     const textRef = textRefs.current[index];
     if (!textRef || !textRef.contains(range.commonAncestorContainer)) return;
-    
+
     const span = document.createElement('span');
     span.style.backgroundColor = highlightColor;
     span.style.borderRadius = '3px';
@@ -141,21 +141,21 @@ function EbookReader() {
     else if (item.type === 'h3') finalContent = <h3 style={{ color: '#283593', marginTop: '1.5rem' }}><LatexRenderer>{contentText}</LatexRenderer></h3>;
     else if (item.type === 'p') finalContent = <p style={{ lineHeight: '1.8', color: '#333', marginBottom: '1.2rem', textAlign: 'justify' }}><LatexRenderer>{contentText}</LatexRenderer></p>;
     else if (item.type === 'list') finalContent = <div style={{ marginBottom: '1.5rem', paddingLeft: '1.5rem', lineHeight: '1.8', color: '#444' }}><LatexRenderer>{contentText}</LatexRenderer></div>;
-    
+
     return (
-      <div key={index} 
+      <div key={index}
         ref={el => contentContainersRef.current[index] = el}
         style={{ position: 'relative', marginBottom: '10px' }}
       >
-        <div 
-          ref={el => textRefs.current[index] = el} 
-          onPointerUp={() => handleMouseUp(index)} 
+        <div
+          ref={el => textRefs.current[index] = el}
+          onPointerUp={() => handleMouseUp(index)}
           style={{ position: 'relative', zIndex: 1, userSelect: isHighlightMode ? 'text' : 'none' }}
         >
           {finalContent}
         </div>
         {savedContent[index] && (
-          <button 
+          <button
             onClick={() => clearHighlight(index)}
             style={{ position: 'absolute', top: '-15px', right: 0, fontSize: '0.7rem', color: '#999', background: 'none', border: 'none', cursor: 'pointer', zIndex: 10 }}
           >
@@ -179,13 +179,13 @@ function EbookReader() {
           <button onClick={() => setIsHighlightMode(!isHighlightMode)} style={tb.pill(isHighlightMode, '#7c6fff')}>
             {isHighlightMode ? '✅ Done' : '🖍️ Highlight Mode'}
           </button>
-          
+
           {isHighlightMode && (
             <>
               <div style={tb.sep} />
               <div style={{ display: 'flex', gap: '4px' }}>
                 {['#FFF800', '#FFD700', '#7CFFC4', '#FFBABA'].map(color => (
-                  <button 
+                  <button
                     key={color}
                     onClick={() => setHighlightColor(color)}
                     style={{ width: '20px', height: '20px', borderRadius: '50%', background: color, border: highlightColor === color ? '2px solid #333' : '1px solid #ddd', cursor: 'pointer' }}

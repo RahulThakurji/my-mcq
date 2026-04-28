@@ -1507,7 +1507,7 @@ function Quiz() {
                         pointerEvents: isDrawingMode ? "none" : "auto", fontSize: "1rem"
                       }}
                     >
-                    <LatexRenderer>{opt}</LatexRenderer>
+                      <LatexRenderer>{opt}</LatexRenderer>
 
                     </button>
                   );
@@ -1539,7 +1539,6 @@ function Quiz() {
                         WebkitUserSelect: isHighlightMode ? "text" : "none", WebkitTouchCallout: "none", pointerEvents: isDrawingMode ? "none" : "auto",
                         textAlign: "left"
                       }}
-                      dangerouslySetInnerHTML={{ __html: "" }} 
                     >
                       <LatexRenderer>{savedExplanations[index] ? savedExplanations[index] : `<span>${q.explanation}</span>`}</LatexRenderer>
                     </div>
