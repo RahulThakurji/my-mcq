@@ -1,4 +1,4 @@
-﻿import { Routes, Route } from 'react-router-dom';
+import { Routes, Route } from 'react-router-dom';
 import Navbar from './components/Navbar';
 import Home from './pages/Home';
 import Courses from './pages/Courses';
@@ -7,6 +7,8 @@ import Subject from './pages/Subject';
 import Quiz from './pages/Quiz';
 import Contact from './pages/Contact';
 import About from './pages/About';
+import Ebooks from './pages/Ebooks';
+
 
 function App() {
   return (
@@ -20,7 +22,9 @@ function App() {
         <Route path="/quiz/:subjectName/chapter/:chapterId" element={<Quiz />} />
         <Route path="/contact" element={<Contact />} />
         <Route path="/about" element={<About />} />
+        <Route path="/ebooks" element={<Ebooks />} />
       </Routes>
+
     </>
   );
 }
