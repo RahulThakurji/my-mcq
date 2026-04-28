@@ -1539,8 +1539,10 @@ function Quiz() {
                         WebkitUserSelect: isHighlightMode ? "text" : "none", WebkitTouchCallout: "none", pointerEvents: isDrawingMode ? "none" : "auto",
                         textAlign: "left"
                       }}
-                      dangerouslySetInnerHTML={{ __html: savedExplanations[index] ? savedExplanations[index] : `<span>${q.explanation}</span>` }}
-                    />
+                      dangerouslySetInnerHTML={{ __html: "" }} 
+                    >
+                      <LatexRenderer>{savedExplanations[index] ? savedExplanations[index] : `<span>${q.explanation}</span>`}</LatexRenderer>
+                    </div>
                     {savedExplanations[index] && (
                       <button onClick={() => clearHighlight(index)} data-tap-btn="true" style={{ marginTop: "6px", padding: "4px 8px", fontSize: "0.82rem", cursor: "pointer", pointerEvents: "auto" }}>
                         Clear Highlight
