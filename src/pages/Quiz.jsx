@@ -480,7 +480,7 @@ function Quiz() {
 
         const stroke = getStroke(pts, {
           size: penWidth,
-          thinning: 0.3,
+          thinning: 0.2,
 
           // INCREASE THESE TWO VALUES:
           smoothing: 0.8,   // Increased for smoother curves
