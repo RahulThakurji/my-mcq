@@ -13,42 +13,16 @@ function EbookReader() {
   const { user } = useAuth();
 
   // --- States ---
-  const [isDrawingMode, setIsDrawingMode] = useState(false);
   const [isHighlightMode, setIsHighlightMode] = useState(false);
-  const [drawTool, setDrawTool] = useState('pen');
-  const [penColor, setPenColor] = useState('#FF003C');
   const [highlightColor, setHighlightColor] = useState('#FFF800');
-  const [penWidth, setPenWidth] = useState(3);
-  const [activeMenu, setActiveMenu] = useState(null);
-  const [eraserMode, setEraserMode] = useState('precision');
-  const [drawings, setDrawings] = useState({}); // Segmented drawings
   const [savedContent, setSavedContent] = useState({}); // Segmented highlights
   const [isInitialLoadComplete, setIsInitialLoadComplete] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
   // --- Refs ---
-  const canvasRefs = useRef({});
-  const previewCanvasRefs = useRef({});
-  const undoHistoryRefs = useRef({});
-  const redoHistoryRefs = useRef({});
   const contentContainersRef = useRef({});
   const textRefs = useRef({});
-  
-  const activeCanvasIndex = useRef(null);
-  const isDrawing = useRef(false);
-  const isSnapped = useRef(false);
-  const snapshot = useRef(null);
-  const preStrokeSnapshot = useRef(null);
-  const startX = useRef(0);
-  const startY = useRef(0);
-  const strokePoints = useRef([]);
-  const holdTimeout = useRef(null);
-  const activePointerType = useRef(null);
-  const activePointers = useRef(new Set());
-  const isHighlightErased = useRef(false);
-  const lastPos = useRef({ x: 0, y: 0 });
-
   const pendingUpdatesRef = useRef({});
 
   // --- Toolbar Viewport Logic ---
@@ -90,11 +64,10 @@ function EbookReader() {
     const unsubscribe = onSnapshot(docRef, (docSnap) => {
       if (docSnap.exists() && !docSnap.metadata.hasPendingWrites) {
         const data = docSnap.data();
-        if (data.drawings !== undefined) setDrawings(data.drawings);
         if (data.savedContent !== undefined) setSavedContent(data.savedContent);
       } else if (!docSnap.exists()) {
-        setDrawings({}); setSavedContent({});
-        setDoc(docRef, { drawings: {}, savedContent: {} }).catch(() => {});
+        setSavedContent({});
+        setDoc(docRef, { savedContent: {} }).catch(() => {});
       }
       setIsInitialLoadComplete(true);
     }, () => setIsInitialLoadComplete(true));
@@ -122,176 +95,6 @@ function EbookReader() {
     } finally { setIsSaving(false); }
   };
 
-  // --- Drawing Logic (Same as Quiz.jsx) ---
-  const snapShape = () => {
-    const points = strokePoints.current;
-    if (points.length < 15) return;
-    const start = points[0];
-    const end = points[points.length - 1];
-    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-    for (let p of points) {
-      if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x;
-      if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y;
-    }
-    const width = maxX - minX; const height = maxY - minY;
-    const diag = Math.hypot(width, height);
-    const gap = Math.hypot(start.x - end.x, start.y - end.y);
-    const canvas = canvasRefs.current[activeCanvasIndex.current];
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    ctx.putImageData(preStrokeSnapshot.current, 0, 0);
-    ctx.beginPath();
-    ctx.globalAlpha = 1.0; ctx.strokeStyle = penColor; ctx.lineWidth = penWidth;
-    ctx.shadowBlur = 1; ctx.shadowColor = penColor;
-    const isClosedShape = gap < diag * 0.3;
-    if (isClosedShape) {
-      const aspect = Math.min(width, height) / Math.max(width, height);
-      if (aspect > 0.7) {
-        const centerX = minX + width / 2; const centerY = minY + height / 2;
-        const radius = Math.max(width, height) / 2;
-        ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
-      } else { ctx.rect(minX, minY, width, height); }
-    } else { ctx.moveTo(start.x, start.y); ctx.lineTo(end.x, end.y); }
-    ctx.stroke(); isSnapped.current = true;
-  };
-
-  const startDrawing = (e, index) => {
-    const { nativeEvent } = e;
-    if (!isDrawingMode) return;
-    if (activeMenu) setActiveMenu(null);
-    if (activePointerType.current === 'pen' && nativeEvent.pointerType === 'touch') return;
-    activePointerType.current = nativeEvent.pointerType;
-    activeCanvasIndex.current = index;
-    const canvas = canvasRefs.current[index];
-    if (!canvas) return;
-    const rect = canvas.getBoundingClientRect();
-    const offsetX = nativeEvent.clientX - rect.left;
-    const offsetY = nativeEvent.clientY - rect.top;
-    const ctx = canvas.getContext('2d');
-    isSnapped.current = false;
-    startX.current = offsetX; startY.current = offsetY;
-    const state = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    preStrokeSnapshot.current = state; snapshot.current = state;
-    if (!undoHistoryRefs.current[index]) undoHistoryRefs.current[index] = [];
-    undoHistoryRefs.current[index].push({ canvas: state, html: textRefs.current[index]?.innerHTML });
-    redoHistoryRefs.current[index] = [];
-    strokePoints.current = [{ x: offsetX, y: offsetY }];
-    isDrawing.current = true;
-    const previewCanvas = previewCanvasRefs.current[index];
-    if (previewCanvas) {
-      const ratio = window.devicePixelRatio || 1;
-      previewCanvas.width = canvas.width; previewCanvas.height = canvas.height;
-      const pCtx = previewCanvas.getContext('2d');
-      pCtx.setTransform(1, 0, 0, 1, 0, 0); pCtx.scale(ratio, ratio); pCtx.clearRect(0, 0, canvas.width, canvas.height);
-    }
-  };
-
-  const draw = (e, index) => {
-    if (!isDrawing.current || activeCanvasIndex.current !== index) return;
-    const canvas = canvasRefs.current[index];
-    const rect = canvas.getBoundingClientRect();
-    const offsetX = e.nativeEvent.clientX - rect.left;
-    const offsetY = e.nativeEvent.clientY - rect.top;
-    strokePoints.current.push({ x: offsetX, y: offsetY });
-    const ctx = canvas.getContext('2d');
-    if (drawTool === 'eraser') {
-      if (eraserMode === 'stroke') { clearPage(index); isDrawing.current = false; return; }
-      ctx.globalCompositeOperation = 'destination-out'; ctx.lineWidth = 25; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
-      ctx.beginPath(); ctx.moveTo(startX.current, startY.current); ctx.lineTo(offsetX, offsetY); ctx.stroke();
-      startX.current = offsetX; startY.current = offsetY;
-      const textRef = textRefs.current[index];
-      if (textRef) {
-        const spans = textRef.querySelectorAll('span[style*="background-color"]');
-        spans.forEach(span => {
-          const rects = span.getClientRects();
-          let hit = false;
-          for (let i = 0; i < rects.length; i++) {
-            const r = rects[i];
-            if (e.nativeEvent.clientX >= r.left - 5 && e.nativeEvent.clientX <= r.right + 5 && e.nativeEvent.clientY >= r.top - 5 && e.nativeEvent.clientY <= r.bottom + 5) { hit = true; break; }
-          }
-          if (hit) {
-            const parent = span.parentNode; while (span.firstChild) parent.insertBefore(span.firstChild, span);
-            parent.removeChild(span); isHighlightErased.current = true;
-          }
-        });
-      }
-    } else if (drawTool === 'pen') {
-      if (isSnapped.current) return;
-      const pCanvas = previewCanvasRefs.current[index];
-      const pCtx = pCanvas?.getContext('2d');
-      if (pCtx) {
-        pCtx.clearRect(0, 0, pCanvas.width, pCanvas.height);
-        pCtx.beginPath(); pCtx.strokeStyle = penColor; pCtx.lineWidth = penWidth; pCtx.lineJoin = 'round'; pCtx.lineCap = 'round';
-        const pts = strokePoints.current;
-        if (pts.length > 2) {
-          pCtx.moveTo(pts[0].x, pts[0].y);
-          for (let i = 1; i < pts.length - 2; i++) {
-            const xc = (pts[i].x + pts[i + 1].x) / 2; const yc = (pts[i].y + pts[i + 1].y) / 2;
-            pCtx.quadraticCurveTo(pts[i].x, pts[i].y, xc, yc);
-          }
-          pCtx.quadraticCurveTo(pts[pts.length - 2].x, pts[pts.length - 2].y, pts[pts.length - 1].x, pts[pts.length - 1].y);
-        }
-        pCtx.stroke();
-      }
-      clearTimeout(holdTimeout.current);
-      holdTimeout.current = setTimeout(() => { if (isDrawing.current && !isSnapped.current) snapShape(); }, 600);
-    } else {
-      ctx.putImageData(snapshot.current, 0, 0); ctx.beginPath(); ctx.strokeStyle = penColor; ctx.lineWidth = penWidth;
-      if (drawTool === 'line') { ctx.moveTo(startX.current, startY.current); ctx.lineTo(offsetX, offsetY); }
-      else if (drawTool === 'rectangle') { ctx.rect(startX.current, startY.current, offsetX - startX.current, offsetY - startY.current); }
-      else if (drawTool === 'circle') { ctx.arc(startX.current, startY.current, Math.hypot(offsetX - startX.current, offsetY - startY.current), 0, 2 * Math.PI); }
-      ctx.stroke();
-    }
-  };
-
-  const stopDrawing = (index) => {
-    if (activeCanvasIndex.current !== index) return;
-    clearTimeout(holdTimeout.current); isDrawing.current = false;
-    const canvas = canvasRefs.current[index];
-    const previewCanvas = previewCanvasRefs.current[index];
-    if (previewCanvas && canvas && drawTool === 'pen') {
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(previewCanvas, 0, 0, canvas.width / (window.devicePixelRatio || 1), canvas.height / (window.devicePixelRatio || 1));
-      previewCanvas.getContext('2d').clearRect(0, 0, previewCanvas.width, previewCanvas.height);
-    }
-    if (canvas) {
-      const url = canvas.toDataURL();
-      setDrawings(prev => { const next = { ...prev, [index]: url }; if (!isHighlightErased.current) queueUpdate({ drawings: next }); return next; });
-      canvas.dataset.loaded = url;
-    }
-    if (isHighlightErased.current) {
-      setSavedContent(prev => { const next = { ...prev, [index]: textRefs.current[index].innerHTML }; queueUpdate({ drawings, savedContent: next }); return next; });
-      isHighlightErased.current = false;
-    }
-    activeCanvasIndex.current = null;
-  };
-
-  const abortDrawing = (index) => {
-    isDrawing.current = false; activeCanvasIndex.current = null;
-    clearTimeout(holdTimeout.current);
-    const canvas = canvasRefs.current[index]; const pCanvas = previewCanvasRefs.current[index];
-    if (canvas && preStrokeSnapshot.current) canvas.getContext('2d').putImageData(preStrokeSnapshot.current, 0, 0);
-    if (pCanvas) pCanvas.getContext('2d').clearRect(0, 0, pCanvas.width, pCanvas.height);
-  };
-
-  const handleUndo = (index) => {
-    if (!undoHistoryRefs.current[index]?.length) return;
-    const canvas = canvasRefs.current[index]; const ctx = canvas.getContext('2d');
-    if (!redoHistoryRefs.current[index]) redoHistoryRefs.current[index] = [];
-    redoHistoryRefs.current[index].push({ canvas: ctx.getImageData(0, 0, canvas.width, canvas.height), html: textRefs.current[index]?.innerHTML });
-    const prevState = undoHistoryRefs.current[index].pop();
-    if (prevState.canvas) ctx.putImageData(prevState.canvas, 0, 0);
-    if (prevState.html !== undefined) textRefs.current[index].innerHTML = prevState.html;
-    const url = canvas.toDataURL();
-    setDrawings(prev => { const next = { ...prev, [index]: url }; setSavedContent(prevC => { const nextC = { ...prevC, [index]: textRefs.current[index].innerHTML }; queueUpdate({ drawings: next, savedContent: nextC }); return nextC; }); return next; });
-  };
-
-  const clearPage = (index) => {
-    const canvas = canvasRefs.current[index];
-    if (canvas) { canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height); canvas.dataset.loaded = "empty"; }
-    setDrawings(prev => { const next = { ...prev }; delete next[index]; queueUpdate({ drawings: next }); return next; });
-  };
-
   // --- Highlighter Logic ---
   const handleMouseUp = (index) => {
     if (!isHighlightMode) return;
@@ -300,41 +103,29 @@ function EbookReader() {
     const range = selection.getRangeAt(0);
     const textRef = textRefs.current[index];
     if (!textRef || !textRef.contains(range.commonAncestorContainer)) return;
+    
     const span = document.createElement('span');
-    span.style.backgroundColor = highlightColor; span.style.borderRadius = '3px';
-    try { range.surroundContents(span); } catch { return; }
+    span.style.backgroundColor = highlightColor;
+    span.style.borderRadius = '3px';
+    try {
+      range.surroundContents(span);
+    } catch {
+      return;
+    }
     selection.removeAllRanges();
     const nextSavedContent = { ...savedContent, [index]: textRef.innerHTML };
-    setSavedContent(nextSavedContent); queueUpdate({ savedContent: nextSavedContent });
+    setSavedContent(nextSavedContent);
+    queueUpdate({ savedContent: nextSavedContent });
   };
 
   const clearHighlight = (index) => {
-    setSavedContent(prev => { const next = { ...prev }; delete next[index]; queueUpdate({ savedContent: next }); return next; });
-  };
-
-  // --- Auto-loader & Resize ---
-  useEffect(() => {
-    if (!chapterData || !isInitialLoadComplete) return;
-    chapterData.content.forEach((_, index) => {
-      const container = contentContainersRef.current[index];
-      const canvas = canvasRefs.current[index];
-      if (canvas && container) {
-        const ratio = window.devicePixelRatio || 1;
-        const tw = Math.round(container.offsetWidth * ratio);
-        const th = Math.round(container.offsetHeight * ratio);
-        if (canvas.width !== tw || canvas.height !== th || (drawings[index] && canvas.dataset.loaded !== drawings[index])) {
-          canvas.width = tw; canvas.height = th;
-          canvas.style.width = `${container.offsetWidth}px`; canvas.style.height = `${container.offsetHeight}px`;
-          const ctx = canvas.getContext('2d'); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.scale(ratio, ratio); ctx.clearRect(0, 0, canvas.width, canvas.height);
-          if (drawings[index]) {
-            const img = new Image(); img.src = drawings[index];
-            img.onload = () => { canvas.getContext('2d').drawImage(img, 0, 0, container.offsetWidth, container.offsetHeight); };
-            canvas.dataset.loaded = drawings[index];
-          }
-        }
-      }
+    setSavedContent(prev => {
+      const next = { ...prev };
+      delete next[index];
+      queueUpdate({ savedContent: next });
+      return next;
     });
-  }, [drawings, isInitialLoadComplete]);
+  };
 
   const getContent = () => {
     if (ebookId === '1') return historicalBackground;
@@ -354,23 +145,22 @@ function EbookReader() {
     return (
       <div key={index} 
         ref={el => contentContainersRef.current[index] = el}
-        onPointerDown={(e) => {
-          activePointers.current.add(e.pointerId);
-          if (activePointers.current.size > 1) { abortDrawing(index); return; }
-          if (isDrawingMode) { try { e.currentTarget.setPointerCapture(e.pointerId); } catch { } startDrawing(e, index); }
-        }}
-        onPointerMove={(e) => { if (activePointers.current.size > 1) { abortDrawing(index); return; } if (isDrawing.current) draw(e, index); }}
-        onPointerUp={(e) => { activePointers.current.delete(e.pointerId); if (isDrawing.current) { try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { } stopDrawing(index); } }}
-        onPointerLeave={(e) => { if (isDrawing.current && activePointers.current.size <= 1) stopDrawing(index); }}
-        onPointerCancel={(e) => { activePointers.current.delete(e.pointerId); abortDrawing(index); }}
-        style={{ position: 'relative', marginBottom: '10px', touchAction: isDrawingMode ? 'pinch-zoom' : 'auto' }}
+        style={{ position: 'relative', marginBottom: '10px' }}
       >
-        <div ref={el => textRefs.current[index] = el} onPointerUp={() => handleMouseUp(index)} style={{ position: 'relative', zIndex: 1, userSelect: isHighlightMode ? 'text' : 'none' }}>{finalContent}</div>
-        {isInitialLoadComplete && (
-          <>
-            <canvas ref={el => canvasRefs.current[index] = el} style={{ position: "absolute", top: 0, left: 0, zIndex: isDrawingMode ? 100 : -1, pointerEvents: 'none' }} />
-            <canvas ref={el => previewCanvasRefs.current[index] = el} style={{ position: "absolute", top: 0, left: 0, zIndex: isDrawingMode ? 101 : -1, pointerEvents: "none" }} />
-          </>
+        <div 
+          ref={el => textRefs.current[index] = el} 
+          onPointerUp={() => handleMouseUp(index)} 
+          style={{ position: 'relative', zIndex: 1, userSelect: isHighlightMode ? 'text' : 'none' }}
+        >
+          {finalContent}
+        </div>
+        {savedContent[index] && (
+          <button 
+            onClick={() => clearHighlight(index)}
+            style={{ position: 'absolute', top: '-15px', right: 0, fontSize: '0.7rem', color: '#999', background: 'none', border: 'none', cursor: 'pointer', zIndex: 10 }}
+          >
+            ✕ Clear Highlight
+          </button>
         )}
       </div>
     );
@@ -379,55 +169,52 @@ function EbookReader() {
   const tb = {
     card: { display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 12px', background: '#ffffff', borderRadius: '50px', boxShadow: '0 4px 15px rgba(0,0,0,0.15)', border: '1px solid #e0e0e0' },
     pill: (active, color, activeColor) => ({ padding: '6px 14px', borderRadius: '25px', border: 'none', background: active ? (activeColor || color) : '#f1f2f6', color: active ? 'white' : '#2f3542', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.2s', display: 'flex', alignItems: 'center', gap: '4px' }),
-    toolBtn: (active) => ({ padding: '8px 12px', borderRadius: '8px', border: 'none', background: active ? '#7c6fff' : 'transparent', color: active ? 'white' : '#333', cursor: 'pointer', textAlign: 'left', display: 'block', width: '100%', fontSize: '14px' }),
     sep: { width: '1px', height: '24px', background: '#ddd', margin: '0 4px' }
   };
-  const popoverStyle = { position: 'absolute', bottom: '100%', left: '50%', transform: 'translateX(-50%)', marginBottom: '10px', background: 'white', padding: '10px', borderRadius: '12px', boxShadow: '0 8px 30px rgba(0,0,0,0.2)', border: '1px solid #eee', display: 'flex', flexDirection: 'column', gap: '4px', minWidth: '160px', zIndex: 10001 };
 
   return (
     <div style={{ background: '#f5f5f5', minHeight: '100vh', padding: '2rem 1rem' }}>
       <div style={toolbarStyle}>
         <div style={tb.card}>
-          <button onClick={() => { setIsDrawingMode(!isDrawingMode); setIsHighlightMode(false); }} style={tb.pill(isDrawingMode, '#7c6fff')}>{isDrawingMode ? '✅ Done' : '✏️ Draw'}</button>
-          <button onClick={() => { setIsHighlightMode(!isHighlightMode); setIsDrawingMode(false); }} style={tb.pill(isHighlightMode, '#7c6fff')}>🖍️ Highlight</button>
-          {(isDrawingMode || isHighlightMode) && (
+          <button onClick={() => setIsHighlightMode(!isHighlightMode)} style={tb.pill(isHighlightMode, '#7c6fff')}>
+            {isHighlightMode ? '✅ Done' : '🖍️ Highlight Mode'}
+          </button>
+          
+          {isHighlightMode && (
             <>
               <div style={tb.sep} />
-              {isDrawingMode && (
-                <div style={{ position: 'relative' }}>
-                  <button onClick={() => setActiveMenu(activeMenu === 'tools' ? null : 'tools')} style={tb.pill(drawTool !== 'eraser' && drawTool !== 'pen', '#7c6fff')}>🛠️ Tools ▼</button>
-                  {activeMenu === 'tools' && (
-                    <div style={popoverStyle}>
-                      <button onClick={() => { setDrawTool('pen'); setActiveMenu(null); }} style={tb.toolBtn(drawTool === 'pen')}>✏️ Pen</button>
-                      <button onClick={() => { setDrawTool('line'); setActiveMenu(null); }} style={tb.toolBtn(drawTool === 'line')}>📏 Line</button>
-                      <button onClick={() => { setDrawTool('rectangle'); setActiveMenu(null); }} style={tb.toolBtn(drawTool === 'rectangle')}>⬜ Rectangle</button>
-                      <button onClick={() => { setDrawTool('circle'); setActiveMenu(null); }} style={tb.toolBtn(drawTool === 'circle')}>⭕ Circle</button>
-                    </div>
-                  )}
-                </div>
-              )}
-              <div style={{ position: 'relative' }}>
-                <button onClick={() => { if (drawTool === 'eraser') setActiveMenu(activeMenu === 'eraser' ? null : 'eraser'); else { setDrawTool('eraser'); setActiveMenu(null); setIsDrawingMode(true); } }} style={tb.pill(drawTool === 'eraser', '#ff4757', '#c0392b')}>🧽 Eraser ▼</button>
-                {activeMenu === 'eraser' && (
-                  <div style={popoverStyle}>
-                    <button onClick={() => { setEraserMode('precision'); setDrawTool('eraser'); setActiveMenu(null); }} style={tb.toolBtn(eraserMode === 'precision')}>🎯 Precision</button>
-                    <button onClick={() => { setEraserMode('stroke'); setDrawTool('eraser'); setActiveMenu(null); }} style={tb.toolBtn(eraserMode === 'stroke')}>🌊 Clear Page</button>
-                  </div>
-                )}
+              <div style={{ display: 'flex', gap: '4px' }}>
+                {['#FFF800', '#FFD700', '#7CFFC4', '#FFBABA'].map(color => (
+                  <button 
+                    key={color}
+                    onClick={() => setHighlightColor(color)}
+                    style={{ width: '20px', height: '20px', borderRadius: '50%', background: color, border: highlightColor === color ? '2px solid #333' : '1px solid #ddd', cursor: 'pointer' }}
+                  />
+                ))}
               </div>
-              <div style={tb.sep} /><button onClick={() => handleUndo(activeCanvasIndex.current || 0)} style={tb.pill(false, '#f1f2f6')}>↩️ Undo</button>
-              <div style={tb.sep} /><button onClick={manualSaveToCloud} style={tb.pill(hasUnsavedChanges, '#2ed573', '#27ae60')} disabled={isSaving}>{isSaving ? '⏳ Saving...' : hasUnsavedChanges ? '💾 Save Now' : '☁️ Saved'}</button>
             </>
           )}
+
+          <div style={tb.sep} />
+          <button onClick={manualSaveToCloud} style={tb.pill(hasUnsavedChanges, '#2ed573', '#27ae60')} disabled={isSaving}>
+            {isSaving ? '⏳ Saving...' : hasUnsavedChanges ? '💾 Save Changes' : '☁️ Saved'}
+          </button>
         </div>
       </div>
 
       <div style={{ maxWidth: '800px', margin: '40px auto 0', background: 'white', padding: '3rem', borderRadius: '8px', boxShadow: '0 4px 20px rgba(0,0,0,0.08)', position: 'relative' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2.5rem', borderBottom: '1px solid #eee', paddingBottom: '1rem' }}>
-          <div><span style={{ fontSize: '0.9rem', color: '#7c6fff', fontWeight: 'bold', textTransform: 'uppercase' }}>{chapterData.bookTitle}</span><h1 style={{ margin: '0', fontSize: '2rem', color: '#1a237e' }}>{chapterData.title}</h1></div>
+          <div>
+            <span style={{ fontSize: '0.9rem', color: '#7c6fff', fontWeight: 'bold', textTransform: 'uppercase' }}>{chapterData.bookTitle}</span>
+            <h1 style={{ margin: '0', fontSize: '2rem', color: '#1a237e' }}>{chapterData.title}</h1>
+          </div>
           <button onClick={() => navigate('/ebooks')} style={{ padding: '8px 16px', background: '#f0f0f0', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', color: '#666' }}>✕ Close</button>
         </div>
-        <div style={{ fontSize: '1.1rem' }}>{chapterData.content.map((item, index) => renderContent(item, index))}</div>
+
+        <div style={{ fontSize: '1.1rem' }}>
+          {chapterData.content.map((item, index) => renderContent(item, index))}
+        </div>
+
         <div style={{ marginTop: '4rem', paddingTop: '2rem', borderTop: '1px solid #eee', display: 'flex', justifyContent: 'space-between' }}>
           <button style={{ padding: '10px 20px', background: '#eee', border: 'none', borderRadius: '6px', color: '#999', cursor: 'not-allowed' }}>← Previous Chapter</button>
           <button onClick={() => alert("Next chapter coming soon!")} style={{ padding: '10px 20px', background: '#1a237e', color: 'white', border: 'none', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer' }}>Next Chapter →</button>
