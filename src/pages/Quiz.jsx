@@ -483,7 +483,7 @@ function Quiz() {
 
           // INCREASE THESE TWO VALUES:
           smoothing: 0.8,   // Previously 0.5. Try 0.8 to 0.95
-          streamline: 0.6, // Previously 0.5. Try 0.8 to 0.95
+          streamline: 0.7, // Previously 0.5. Try 0.8 to 0.95
 
           simulatePressure: nativeEvent.pointerType !== 'pen'
         });
