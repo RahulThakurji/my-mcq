@@ -1,42 +1,64 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useMemo } from 'react';
 import katex from 'katex';
-import renderMathInElement from 'katex/dist/contrib/auto-render';
 import 'katex/dist/katex.min.css';
 
 /**
- * High-performance LaTeX Renderer using KaTeX's official auto-render extension.
- * This is the most reliable way to handle mixed HTML/LaTeX content.
+ * Bulletproof LaTeX Renderer.
+ * Manually parses math delimiters and replaces them with KaTeX-rendered HTML
+ * before inserting into the DOM. This ensures perfect rendering even in
+ * complex React 19 environments with dynamic content.
  */
 const LatexRenderer = ({ children }) => {
-  const containerRef = useRef(null);
+  const renderedHTML = useMemo(() => {
+    if (typeof children !== 'string') return children;
 
-  useEffect(() => {
-    if (containerRef.current) {
-      try {
-        renderMathInElement(containerRef.current, {
-          delimiters: [
-            { left: '$$', right: '$$', display: true },
-            { left: '$', right: '$', display: false },
-          ],
-          throwOnError: false,
-          trust: true,
-          strict: false
-        });
-      } catch (error) {
-        console.error("Auto-render Error:", error);
+    // We split the string by math delimiters but keep the delimiters in the array
+    const parts = children.split(/(\$\$[\s\S]+?\$\$|\$[\s\S]+?\$)/g);
+    
+    return parts.map(part => {
+      if (!part) return "";
+
+      // Block Math match
+      if (part.startsWith('$$') && part.endsWith('$$')) {
+        const formula = part.slice(2, -2).trim();
+        try {
+          return katex.renderToString(formula, {
+            displayMode: true,
+            throwOnError: false,
+            trust: true
+          });
+        } catch (e) {
+          console.error("KaTeX Error:", e);
+          return part;
+        }
       }
-    }
+
+      // Inline Math match
+      if (part.startsWith('$') && part.endsWith('$')) {
+        const formula = part.slice(1, -1).trim();
+        try {
+          return katex.renderToString(formula, {
+            displayMode: false,
+            throwOnError: false,
+            trust: true
+          });
+        } catch (e) {
+          console.error("KaTeX Error:", e);
+          return part;
+        }
+      }
+
+      // Plain text (which might contain highlight spans)
+      return part;
+    }).join("");
   }, [children]);
 
-  // Use dangerouslySetInnerHTML to ensure that the highlighter's HTML spans
-  // are preserved before KaTeX processes the text.
-  const content = typeof children === 'string' ? children : '';
+  if (typeof children !== 'string') return children;
 
   return (
     <span 
-      ref={containerRef} 
-      className="latex-container"
-      dangerouslySetInnerHTML={{ __html: content }} 
+      className="latex-rendered-content"
+      dangerouslySetInnerHTML={{ __html: renderedHTML }} 
     />
   );
 };
