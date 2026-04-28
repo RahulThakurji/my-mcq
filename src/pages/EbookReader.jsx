@@ -1,6 +1,7 @@
 import React from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { historicalBackground } from '../data/ebooks/polity/historicalBackground';
+import { electromagnetism } from '../data/ebooks/physics/electromagnetism';
 import LatexRenderer from '../components/LatexRenderer';
 
 
@@ -8,8 +9,14 @@ function EbookReader() {
   const { ebookId, chapterId } = useParams();
   const navigate = useNavigate();
 
-  // For now, we only have one chapter implemented
-  const chapterData = historicalBackground;
+  // Dynamic content loading
+  const getContent = () => {
+    if (ebookId === '1') return historicalBackground;
+    if (ebookId === '4') return electromagnetism; // 4 is the ID we'll give to Electromagnetism
+    return historicalBackground; // fallback
+  };
+
+  const chapterData = getContent();
 
   const renderContent = (item, index) => {
     switch (item.type) {

@@ -26,6 +26,24 @@ function Ebooks() {
     },
     { id: 2, title: 'Modern Indian History', category: 'History', price: 'Premium', chapters: [] },
     { id: 3, title: 'Geography of India', category: 'Geography', price: 'Free', chapters: [] },
+    { 
+      id: 4, 
+      title: 'Electromagnetism - Theory & Apps', 
+      category: 'Physics', 
+      price: 'Free',
+      chapters: [
+        '1. Electrostatics & Gauss\'s Law',
+        '2. Electric Potential',
+        '3. Capacitance and Dielectrics',
+        '4. Current and Resistance',
+        '5. Magnetic Fields',
+        '6. Sources of Magnetic Field',
+        '7. Faraday\'s Law',
+        '8. Inductance',
+        '9. Alternating Current',
+        '10. Maxwell\'s Equations'
+      ]
+    },
   ];
 
   const toggleExpand = (id) => {
@@ -115,32 +133,34 @@ function Ebooks() {
                       onClick={() => {
                         if (chapter.includes("Historical Background")) {
                           navigate(`/ebook/${ebook.id}/chapter/1`);
+                        } else if (chapter.includes("Electrostatics & Gauss's Law")) {
+                          navigate(`/ebook/${ebook.id}/chapter/1`);
                         }
                       }}
                       style={{ 
                         padding: '12px', 
                         fontSize: '0.9rem', 
-                        color: chapter.includes("Historical Background") ? '#1a237e' : '#444',
+                        color: (chapter.includes("Historical Background") || chapter.includes("Electrostatics & Gauss's Law")) ? '#1a237e' : '#444',
                         borderBottom: '1px solid #eee',
                         display: 'flex',
                         alignItems: 'center',
                         gap: '8px',
-                        cursor: chapter.includes("Historical Background") ? 'pointer' : 'default',
-                        background: chapter.includes("Historical Background") ? '#f0f4ff' : 'transparent',
+                        cursor: (chapter.includes("Historical Background") || chapter.includes("Electrostatics & Gauss's Law")) ? 'pointer' : 'default',
+                        background: (chapter.includes("Historical Background") || chapter.includes("Electrostatics & Gauss's Law")) ? '#f0f4ff' : 'transparent',
                         borderRadius: '4px',
-                        fontWeight: chapter.includes("Historical Background") ? 'bold' : 'normal',
+                        fontWeight: (chapter.includes("Historical Background") || chapter.includes("Electrostatics & Gauss's Law")) ? 'bold' : 'normal',
                         transition: 'all 0.2s'
                       }}
                       onMouseEnter={(e) => {
-                        if (chapter.includes("Historical Background")) e.currentTarget.style.background = '#e0eaff';
+                        if (chapter.includes("Historical Background") || chapter.includes("Electrostatics & Gauss's Law")) e.currentTarget.style.background = '#e0eaff';
                       }}
                       onMouseLeave={(e) => {
-                        if (chapter.includes("Historical Background")) e.currentTarget.style.background = '#f0f4ff';
+                        if (chapter.includes("Historical Background") || chapter.includes("Electrostatics & Gauss's Law")) e.currentTarget.style.background = '#f0f4ff';
                       }}
                     >
-                      <span style={{ color: '#7c6fff' }}>{chapter.includes("Historical Background") ? '📖' : '•'}</span>
+                      <span style={{ color: '#7c6fff' }}>{(chapter.includes("Historical Background") || chapter.includes("Electrostatics & Gauss's Law")) ? '📖' : '•'}</span>
                       {chapter}
-                      {chapter.includes("Historical Background") && <span style={{ marginLeft: 'auto', fontSize: '0.7rem', color: '#7c6fff', textTransform: 'uppercase' }}>Ready to read</span>}
+                      {(chapter.includes("Historical Background") || chapter.includes("Electrostatics & Gauss's Law")) && <span style={{ marginLeft: 'auto', fontSize: '0.7rem', color: '#7c6fff', textTransform: 'uppercase' }}>Ready to read</span>}
                     </div>
                   ))}
                 </div>
