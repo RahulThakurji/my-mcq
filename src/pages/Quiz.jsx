@@ -482,7 +482,7 @@ function Quiz() {
           thinning: 0.6,
 
           // INCREASE THESE TWO VALUES:
-          smoothing: 0.5,   // Increased for smoother curves
+          smoothing: 0.8,   // Increased for smoother curves
           streamline: 0.8, // Increased for better stroke following
 
           simulatePressure: nativeEvent.pointerType !== 'pen'
