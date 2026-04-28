@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 
 function Ebooks() {
   const [expandedId, setExpandedId] = useState(null);
+  const navigate = useNavigate();
 
   const ebooks = [
     { 
@@ -108,17 +110,37 @@ function Ebooks() {
                 <h4 style={{ margin: '0 0 1rem 0', color: '#1a237e' }}>Table of Contents</h4>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: '0.8rem' }}>
                   {ebook.chapters.map((chapter, i) => (
-                    <div key={i} style={{ 
-                      padding: '8px', 
-                      fontSize: '0.9rem', 
-                      color: '#444',
-                      borderBottom: '1px solid #eee',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '8px'
-                    }}>
-                      <span style={{ color: '#7c6fff' }}>•</span>
+                    <div 
+                      key={i} 
+                      onClick={() => {
+                        if (chapter.includes("Historical Background")) {
+                          navigate(`/ebook/${ebook.id}/chapter/1`);
+                        }
+                      }}
+                      style={{ 
+                        padding: '12px', 
+                        fontSize: '0.9rem', 
+                        color: chapter.includes("Historical Background") ? '#1a237e' : '#444',
+                        borderBottom: '1px solid #eee',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        cursor: chapter.includes("Historical Background") ? 'pointer' : 'default',
+                        background: chapter.includes("Historical Background") ? '#f0f4ff' : 'transparent',
+                        borderRadius: '4px',
+                        fontWeight: chapter.includes("Historical Background") ? 'bold' : 'normal',
+                        transition: 'all 0.2s'
+                      }}
+                      onMouseEnter={(e) => {
+                        if (chapter.includes("Historical Background")) e.currentTarget.style.background = '#e0eaff';
+                      }}
+                      onMouseLeave={(e) => {
+                        if (chapter.includes("Historical Background")) e.currentTarget.style.background = '#f0f4ff';
+                      }}
+                    >
+                      <span style={{ color: '#7c6fff' }}>{chapter.includes("Historical Background") ? '📖' : '•'}</span>
                       {chapter}
+                      {chapter.includes("Historical Background") && <span style={{ marginLeft: 'auto', fontSize: '0.7rem', color: '#7c6fff', textTransform: 'uppercase' }}>Ready to read</span>}
                     </div>
                   ))}
                 </div>

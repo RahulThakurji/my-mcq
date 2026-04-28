@@ -8,6 +8,8 @@ import Quiz from './pages/Quiz';
 import Contact from './pages/Contact';
 import About from './pages/About';
 import Ebooks from './pages/Ebooks';
+import EbookReader from './pages/EbookReader';
+
 
 
 function App() {
@@ -23,7 +25,9 @@ function App() {
         <Route path="/contact" element={<Contact />} />
         <Route path="/about" element={<About />} />
         <Route path="/ebooks" element={<Ebooks />} />
+        <Route path="/ebook/:ebookId/chapter/:chapterId" element={<EbookReader />} />
       </Routes>
+
 
     </>
   );
