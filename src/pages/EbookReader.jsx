@@ -36,8 +36,9 @@ function EbookReader() {
   const [penWidth, setPenWidth] = useState(3);
   const [activeMenu, setActiveMenu] = useState(null);
   const [eraserMode, setEraserMode] = useState('precision');
-  const [drawings, setDrawings] = useState({}); // Segmented drawings
-  const [savedContent, setSavedContent] = useState({}); // Segmented highlights
+  const [drawings, setDrawings] = useState({}); 
+  const [savedContent, setSavedContent] = useState({}); 
+  const [historyState, setHistoryState] = useState({});
   const [isInitialLoadComplete, setIsInitialLoadComplete] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
@@ -65,6 +66,17 @@ function EbookReader() {
   const lastPos = useRef({ x: 0, y: 0 });
 
   const pendingUpdatesRef = useRef({});
+
+  const updateHistoryState = (index) => {
+    if (index === null) return;
+    setHistoryState(prev => ({
+      ...prev,
+      [index]: {
+        undo: undoHistoryRefs.current[index]?.length || 0,
+        redo: redoHistoryRefs.current[index]?.length || 0
+      }
+    }));
+  };
 
   // --- Toolbar Viewport Logic ---
   const [toolbarStyle, setToolbarStyle] = useState({
@@ -137,26 +149,23 @@ function EbookReader() {
     } finally { setIsSaving(false); }
   };
 
-  // --- Drawing Logic (Same as Quiz.jsx) ---
+  // --- Drawing Logic ---
   const snapShape = () => {
     const points = strokePoints.current;
     if (points.length < 15) return;
-    const start = points[0];
-    const end = points[points.length - 1];
+    const start = points[0]; const end = points[points.length - 1];
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
     for (let p of points) {
       if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x;
       if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y;
     }
     const width = maxX - minX; const height = maxY - minY;
-    const diag = Math.hypot(width, height);
-    const gap = Math.hypot(start.x - end.x, start.y - end.y);
+    const diag = Math.hypot(width, height); const gap = Math.hypot(start.x - end.x, start.y - end.y);
     const canvas = canvasRefs.current[activeCanvasIndex.current];
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     ctx.putImageData(preStrokeSnapshot.current, 0, 0);
-    ctx.beginPath();
-    ctx.globalAlpha = 1.0; ctx.strokeStyle = penColor; ctx.lineWidth = penWidth;
+    ctx.beginPath(); ctx.globalAlpha = 1.0; ctx.strokeStyle = penColor; ctx.lineWidth = penWidth;
     ctx.shadowBlur = 1; ctx.shadowColor = penColor;
     const isClosedShape = gap < diag * 0.3;
     if (isClosedShape) {
@@ -177,21 +186,18 @@ function EbookReader() {
     if (activePointerType.current === 'pen' && nativeEvent.pointerType === 'touch') return;
     activePointerType.current = nativeEvent.pointerType;
     activeCanvasIndex.current = index;
-    const canvas = canvasRefs.current[index];
-    if (!canvas) return;
+    const canvas = canvasRefs.current[index]; if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
-    const offsetX = nativeEvent.clientX - rect.left;
-    const offsetY = nativeEvent.clientY - rect.top;
+    const offsetX = nativeEvent.clientX - rect.left; const offsetY = nativeEvent.clientY - rect.top;
     const ctx = canvas.getContext('2d');
-    isSnapped.current = false;
-    startX.current = offsetX; startY.current = offsetY;
+    isSnapped.current = false; startX.current = offsetX; startY.current = offsetY;
     const state = ctx.getImageData(0, 0, canvas.width, canvas.height);
     preStrokeSnapshot.current = state; snapshot.current = state;
     if (!undoHistoryRefs.current[index]) undoHistoryRefs.current[index] = [];
     undoHistoryRefs.current[index].push({ canvas: state, html: textRefs.current[index]?.innerHTML });
     redoHistoryRefs.current[index] = [];
     strokePoints.current = [{ x: offsetX, y: offsetY, pressure: nativeEvent.pressure || 0.5 }];
-    isDrawing.current = true;
+    isDrawing.current = true; updateHistoryState(index);
     const previewCanvas = previewCanvasRefs.current[index];
     if (previewCanvas) {
       const ratio = window.devicePixelRatio || 1;
@@ -203,14 +209,10 @@ function EbookReader() {
 
   const draw = (e, index) => {
     if (!isDrawing.current || activeCanvasIndex.current !== index) return;
-    const canvas = canvasRefs.current[index];
-    const rect = canvas.getBoundingClientRect();
-    const offsetX = e.nativeEvent.clientX - rect.left;
-    const offsetY = e.nativeEvent.clientY - rect.top;
+    const canvas = canvasRefs.current[index]; const rect = canvas.getBoundingClientRect();
+    const offsetX = e.nativeEvent.clientX - rect.left; const offsetY = e.nativeEvent.clientY - rect.top;
     strokePoints.current.push({ x: offsetX, y: offsetY, pressure: e.nativeEvent.pressure || 0.5 });
-    const pts = strokePoints.current;
-    const ctx = canvas.getContext('2d');
-
+    const pts = strokePoints.current; const ctx = canvas.getContext('2d');
     if (drawTool === 'eraser') {
       if (eraserMode === 'stroke') { clearPage(index); isDrawing.current = false; return; }
       ctx.globalCompositeOperation = 'destination-out'; ctx.lineWidth = 25; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
@@ -220,8 +222,7 @@ function EbookReader() {
       if (textRef) {
         const spans = textRef.querySelectorAll('span[style*="background-color"]');
         spans.forEach(span => {
-          const rcts = span.getClientRects();
-          let hit = false;
+          const rcts = span.getClientRects(); let hit = false;
           for (let i = 0; i < rcts.length; i++) {
             const r = rcts[i];
             if (e.nativeEvent.clientX >= r.left - 5 && e.nativeEvent.clientX <= r.right + 5 && e.nativeEvent.clientY >= r.top - 5 && e.nativeEvent.clientY <= r.bottom + 5) { hit = true; break; }
@@ -234,16 +235,11 @@ function EbookReader() {
       }
     } else if (drawTool === 'pen') {
       if (isSnapped.current) return;
-      const pCanvas = previewCanvasRefs.current[index];
-      const pCtx = pCanvas?.getContext('2d');
+      const pCanvas = previewCanvasRefs.current[index]; const pCtx = pCanvas?.getContext('2d');
       if (pCtx) {
         pCtx.clearRect(0, 0, pCanvas.width, pCanvas.height);
-        const stroke = getStroke(pts, {
-          size: penWidth, thinning: 0.2, smoothing: 0.8, streamline: 0.8,
-          simulatePressure: e.nativeEvent.pointerType !== 'pen'
-        });
-        const pathData = getSvgPathFromStroke(stroke);
-        const path = new Path2D(pathData);
+        const stroke = getStroke(pts, { size: penWidth, thinning: 0.2, smoothing: 0.8, streamline: 0.8, simulatePressure: e.nativeEvent.pointerType !== 'pen' });
+        const pathData = getSvgPathFromStroke(stroke); const path = new Path2D(pathData);
         pCtx.fillStyle = penColor; pCtx.fill(path);
       }
       clearTimeout(holdTimeout.current);
@@ -260,8 +256,7 @@ function EbookReader() {
   const stopDrawing = (index) => {
     if (activeCanvasIndex.current !== index) return;
     clearTimeout(holdTimeout.current); isDrawing.current = false;
-    const canvas = canvasRefs.current[index];
-    const previewCanvas = previewCanvasRefs.current[index];
+    const canvas = canvasRefs.current[index]; const previewCanvas = previewCanvasRefs.current[index];
     if (previewCanvas && canvas && drawTool === 'pen') {
       const ctx = canvas.getContext('2d');
       ctx.drawImage(previewCanvas, 0, 0, canvas.width / (window.devicePixelRatio || 1), canvas.height / (window.devicePixelRatio || 1));
@@ -276,12 +271,11 @@ function EbookReader() {
       setSavedContent(prev => { const next = { ...prev, [index]: textRefs.current[index].innerHTML }; queueUpdate({ drawings, savedContent: next }); return next; });
       isHighlightErased.current = false;
     }
-    activeCanvasIndex.current = null;
+    updateHistoryState(index); activeCanvasIndex.current = null;
   };
 
   const abortDrawing = (index) => {
-    isDrawing.current = false; activeCanvasIndex.current = null;
-    clearTimeout(holdTimeout.current);
+    isDrawing.current = false; activeCanvasIndex.current = null; clearTimeout(holdTimeout.current);
     const canvas = canvasRefs.current[index]; const pCanvas = previewCanvasRefs.current[index];
     if (canvas && preStrokeSnapshot.current) canvas.getContext('2d').putImageData(preStrokeSnapshot.current, 0, 0);
     if (pCanvas) pCanvas.getContext('2d').clearRect(0, 0, pCanvas.width, pCanvas.height);
@@ -295,63 +289,58 @@ function EbookReader() {
     const prevState = undoHistoryRefs.current[index].pop();
     if (prevState.canvas) ctx.putImageData(prevState.canvas, 0, 0);
     if (prevState.html !== undefined) textRefs.current[index].innerHTML = prevState.html;
-    const url = canvas.toDataURL();
+    const url = canvas.toDataURL(); updateHistoryState(index);
+    setDrawings(prev => { const next = { ...prev, [index]: url }; setSavedContent(prevC => { const nextC = { ...prevC, [index]: textRefs.current[index].innerHTML }; queueUpdate({ drawings: next, savedContent: nextC }); return nextC; }); return next; });
+  };
+
+  const handleRedo = (index) => {
+    if (!redoHistoryRefs.current[index]?.length) return;
+    const canvas = canvasRefs.current[index]; const ctx = canvas.getContext('2d');
+    undoHistoryRefs.current[index].push({ canvas: ctx.getImageData(0, 0, canvas.width, canvas.height), html: textRefs.current[index]?.innerHTML });
+    const nextState = redoHistoryRefs.current[index].pop();
+    if (nextState.canvas) ctx.putImageData(nextState.canvas, 0, 0);
+    if (nextState.html !== undefined) textRefs.current[index].innerHTML = nextState.html;
+    const url = canvas.toDataURL(); updateHistoryState(index);
     setDrawings(prev => { const next = { ...prev, [index]: url }; setSavedContent(prevC => { const nextC = { ...prevC, [index]: textRefs.current[index].innerHTML }; queueUpdate({ drawings: next, savedContent: nextC }); return nextC; }); return next; });
   };
 
   const clearPage = (index) => {
-    const canvas = canvasRefs.current[index];
-    if (canvas) { canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height); canvas.dataset.loaded = "empty"; }
+    const canvas = canvasRefs.current[index]; if (canvas) { canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height); canvas.dataset.loaded = "empty"; }
     setDrawings(prev => { const next = { ...prev }; delete next[index]; queueUpdate({ drawings: next }); return next; });
   };
 
   // --- Highlighter Logic ---
   const handleMouseUp = (index) => {
     if (!isHighlightMode) return;
-    const selection = window.getSelection();
-    if (!selection.rangeCount || selection.isCollapsed) return;
-    const range = selection.getRangeAt(0);
-    const textRef = textRefs.current[index];
+    const selection = window.getSelection(); if (!selection.rangeCount || selection.isCollapsed) return;
+    const range = selection.getRangeAt(0); const textRef = textRefs.current[index];
     if (!textRef || !textRef.contains(range.commonAncestorContainer)) return;
-    const span = document.createElement('span');
-    span.style.backgroundColor = highlightColor; span.style.borderRadius = '3px';
+    const span = document.createElement('span'); span.style.backgroundColor = highlightColor; span.style.borderRadius = '3px';
     try { range.surroundContents(span); } catch { return; }
     selection.removeAllRanges();
     const nextSavedContent = { ...savedContent, [index]: textRef.innerHTML };
     setSavedContent(nextSavedContent); queueUpdate({ savedContent: nextSavedContent });
   };
 
-  const clearHighlight = (index) => {
-    setSavedContent(prev => { const next = { ...prev }; delete next[index]; queueUpdate({ savedContent: next }); return next; });
-  };
-
   // --- Auto-loader & Resize ---
   useEffect(() => {
     if (!chapterData || !isInitialLoadComplete) return;
     chapterData.content.forEach((_, index) => {
-      const container = contentContainersRef.current[index];
-      const canvas = canvasRefs.current[index];
+      const container = contentContainersRef.current[index]; const canvas = canvasRefs.current[index];
       if (canvas && container) {
         const ratio = window.devicePixelRatio || 1;
-        const tw = Math.round(container.offsetWidth * ratio);
-        const th = Math.round(container.offsetHeight * ratio);
+        const tw = Math.round(container.offsetWidth * ratio); const th = Math.round(container.offsetHeight * ratio);
         if (canvas.width !== tw || canvas.height !== th || (drawings[index] && canvas.dataset.loaded !== drawings[index])) {
-          canvas.width = tw; canvas.height = th;
-          canvas.style.width = `${container.offsetWidth}px`; canvas.style.height = `${container.offsetHeight}px`;
+          canvas.width = tw; canvas.height = th; canvas.style.width = `${container.offsetWidth}px`; canvas.style.height = `${container.offsetHeight}px`;
           const ctx = canvas.getContext('2d'); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.scale(ratio, ratio); ctx.clearRect(0, 0, canvas.width, canvas.height);
-          if (drawings[index]) {
-            const img = new Image(); img.src = drawings[index];
-            img.onload = () => { canvas.getContext('2d').drawImage(img, 0, 0, container.offsetWidth, container.offsetHeight); };
-            canvas.dataset.loaded = drawings[index];
-          }
+          if (drawings[index]) { const img = new Image(); img.src = drawings[index]; img.onload = () => { canvas.getContext('2d').drawImage(img, 0, 0, container.offsetWidth, container.offsetHeight); }; canvas.dataset.loaded = drawings[index]; }
         }
       }
     });
   }, [drawings, isInitialLoadComplete]);
 
   const getContent = () => {
-    if (ebookId === '1') return historicalBackground;
-    if (ebookId === '4') return electromagnetism;
+    if (ebookId === '1') return historicalBackground; if (ebookId === '4') return electromagnetism;
     return historicalBackground;
   };
   const chapterData = getContent();
@@ -365,11 +354,9 @@ function EbookReader() {
     else if (item.type === 'list') finalContent = <div style={{ marginBottom: '1.5rem', paddingLeft: '1.5rem', lineHeight: '1.8', color: '#444' }}><LatexRenderer>{contentText}</LatexRenderer></div>;
     
     return (
-      <div key={index} 
-        ref={el => contentContainersRef.current[index] = el}
+      <div key={index} ref={el => contentContainersRef.current[index] = el}
         onPointerDown={(e) => {
-          activePointers.current.add(e.pointerId);
-          if (activePointers.current.size > 1) { abortDrawing(index); return; }
+          activePointers.current.add(e.pointerId); if (activePointers.current.size > 1) { abortDrawing(index); return; }
           if (isDrawingMode) { try { e.currentTarget.setPointerCapture(e.pointerId); } catch { } startDrawing(e, index); }
         }}
         onPointerMove={(e) => { if (activePointers.current.size > 1) { abortDrawing(index); return; } if (isDrawing.current) draw(e, index); }}
@@ -380,62 +367,74 @@ function EbookReader() {
       >
         <div ref={el => textRefs.current[index] = el} onPointerUp={() => handleMouseUp(index)} style={{ position: 'relative', zIndex: 1, userSelect: isHighlightMode ? 'text' : 'none' }}>{finalContent}</div>
         {isInitialLoadComplete && (
-          <>
-            <canvas ref={el => canvasRefs.current[index] = el} style={{ position: "absolute", top: 0, left: 0, zIndex: isDrawingMode ? 100 : -1, pointerEvents: 'none' }} />
-            <canvas ref={el => previewCanvasRefs.current[index] = el} style={{ position: "absolute", top: 0, left: 0, zIndex: isDrawingMode ? 101 : -1, pointerEvents: "none" }} />
-          </>
+          <><canvas ref={el => canvasRefs.current[index] = el} style={{ position: "absolute", top: 0, left: 0, zIndex: isDrawingMode ? 100 : -1, pointerEvents: 'none' }} />
+          <canvas ref={el => previewCanvasRefs.current[index] = el} style={{ position: "absolute", top: 0, left: 0, zIndex: isDrawingMode ? 101 : -1, pointerEvents: "none" }} /></>
         )}
       </div>
     );
   };
 
   const tb = {
-    card: { display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 12px', background: '#ffffff', borderRadius: '50px', boxShadow: '0 4px 15px rgba(0,0,0,0.15)', border: '1px solid #e0e0e0' },
-    pill: (active, color, activeColor) => ({ padding: '6px 14px', borderRadius: '25px', border: 'none', background: active ? (activeColor || color) : '#f1f2f6', color: active ? 'white' : '#2f3542', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.2s', display: 'flex', alignItems: 'center', gap: '4px' }),
-    toolBtn: (active) => ({ padding: '8px 12px', borderRadius: '8px', border: 'none', background: active ? '#7c6fff' : 'transparent', color: active ? 'white' : '#333', cursor: 'pointer', textAlign: 'left', display: 'block', width: '100%', fontSize: '14px' }),
-    sep: { width: '1px', height: '24px', background: '#ddd', margin: '0 4px' }
+    wrap: { display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 12px', background: '#2f3542', borderRadius: '50px', boxShadow: '0 8px 32px rgba(0,0,0,0.3)', border: '1.5px solid rgba(255,255,255,0.1)', zIndex: 10001, flexWrap: "nowrap" },
+    pill: (active, color, activeColor) => ({ padding: '6px 14px', borderRadius: '25px', border: 'none', background: active ? (activeColor || color) : 'transparent', color: active ? 'white' : '#ccc', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.2s', display: 'flex', alignItems: 'center', gap: '4px' }),
+    toolBtn: (active) => ({ padding: '8px 12px', borderRadius: '8px', border: 'none', background: active ? 'rgba(255,255,255,0.1)' : 'transparent', color: 'white', cursor: 'pointer', textAlign: 'left', display: 'block', width: '100%', fontSize: '14px' }),
+    undoBtn: (active) => ({ padding: '6px 12px', background: 'transparent', border: 'none', color: active ? 'white' : '#555', cursor: active ? 'pointer' : 'not-allowed', fontSize: '1.2rem' }),
+    dot: (active, color) => ({ width: '18px', height: '18px', borderRadius: '50%', background: color, border: active ? '2px solid white' : 'none', cursor: 'pointer' }),
+    card: { display: 'flex', alignItems: 'center', gap: '4px', background: 'rgba(255,255,255,0.05)', padding: '4px 8px', borderRadius: '20px', border: '1px solid rgba(255,255,255,0.1)', cursor: 'pointer' },
+    sep: { width: '1px', height: '24px', background: 'rgba(255,255,255,0.1)', margin: '0 4px' }
   };
-  const popoverStyle = { position: 'absolute', bottom: '100%', left: '50%', transform: 'translateX(-50%)', marginBottom: '10px', background: 'white', padding: '10px', borderRadius: '12px', boxShadow: '0 8px 30px rgba(0,0,0,0.2)', border: '1px solid #eee', display: 'flex', flexDirection: 'column', gap: '4px', minWidth: '160px', zIndex: 10001 };
+  const popoverStyle = { position: 'absolute', bottom: '100%', left: '50%', transform: 'translateX(-50%)', marginBottom: '10px', background: '#2f3542', padding: '10px', borderRadius: '12px', boxShadow: '0 8px 30px rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.1)', display: 'flex', flexDirection: 'column', gap: '4px', minWidth: '160px', zIndex: 10002 };
+
+  const penColors = [{ c: '#FF003C', n: 'Red' }, { c: '#00D0FF', n: 'Cyan' }, { c: '#00FF33', n: 'Green' }, { c: '#FF8800', n: 'Orange' }, { c: '#D500F9', n: 'Purple' }, { c: '#111111', n: 'Black' }, { c: '#FFFFFF', n: 'White' }];
+  const hlColors = [{ c: '#FFF800', n: 'Yellow' }, { c: '#00FF66', n: 'Green' }, { c: '#FF007F', n: 'Pink' }, { c: '#00E5FF', n: 'Blue' }];
+  const tools = [{ v: 'pen', icon: '✏️', label: 'Pen' }, { v: 'line', icon: '╱', label: 'Line' }, { v: 'rectangle', icon: '▭', label: 'Rect' }, { v: 'circle', icon: '◯', label: 'Circle' }];
 
   return (
     <div style={{ background: '#f5f5f5', minHeight: '100vh', padding: '2rem 1rem' }}>
       <div style={toolbarStyle}>
-        <div style={tb.card}>
-          <button onClick={() => { setIsDrawingMode(!isDrawingMode); setIsHighlightMode(false); }} style={tb.pill(isDrawingMode, '#7c6fff')}>{isDrawingMode ? '✅ Done' : '✏️ Draw'}</button>
-          <button onClick={() => { setIsHighlightMode(!isHighlightMode); setIsDrawingMode(false); }} style={tb.pill(isHighlightMode, '#7c6fff')}>🖍️ Highlight</button>
-          {(isDrawingMode || isHighlightMode) && (
-            <>
-              <div style={tb.sep} />
-              {isDrawingMode && (
-                <div style={{ position: 'relative' }}>
-                  <button onClick={() => setActiveMenu(activeMenu === 'tools' ? null : 'tools')} style={tb.pill(drawTool !== 'eraser' && drawTool !== 'pen', '#7c6fff')}>🛠️ Tools ▼</button>
-                  {activeMenu === 'tools' && (
-                    <div style={popoverStyle}>
-                      <button onClick={() => { setDrawTool('pen'); setActiveMenu(null); }} style={tb.toolBtn(drawTool === 'pen')}>✏️ Pen</button>
-                      <button onClick={() => { setDrawTool('line'); setActiveMenu(null); }} style={tb.toolBtn(drawTool === 'line')}>📏 Line</button>
-                      <button onClick={() => { setDrawTool('rectangle'); setActiveMenu(null); }} style={tb.toolBtn(drawTool === 'rectangle')}>⬜ Rectangle</button>
-                      <button onClick={() => { setDrawTool('circle'); setActiveMenu(null); }} style={tb.toolBtn(drawTool === 'circle')}>⭕ Circle</button>
-                    </div>
-                  )}
-                </div>
-              )}
-              <div style={{ position: 'relative' }}>
-                <button onClick={() => { if (drawTool === 'eraser') setActiveMenu(activeMenu === 'eraser' ? null : 'eraser'); else { setDrawTool('eraser'); setActiveMenu(null); setIsDrawingMode(true); } }} style={tb.pill(drawTool === 'eraser', '#ff4757', '#c0392b')}>🧽 Eraser ▼</button>
-                {activeMenu === 'eraser' && (
-                  <div style={popoverStyle}>
-                    <button onClick={() => { setEraserMode('precision'); setDrawTool('eraser'); setActiveMenu(null); }} style={tb.toolBtn(eraserMode === 'precision')}>🎯 Precision</button>
-                    <button onClick={() => { setEraserMode('stroke'); setDrawTool('eraser'); setActiveMenu(null); }} style={tb.toolBtn(eraserMode === 'stroke')}>🌊 Clear Page</button>
-                  </div>
-                )}
+        <div style={tb.wrap}>
+          <button onClick={() => { if (isDrawingMode && drawTool !== 'eraser') setIsDrawingMode(false); else { setIsDrawingMode(true); setIsHighlightMode(false); if (drawTool === 'eraser') setDrawTool('pen'); setActiveMenu(null); } }} style={tb.pill(isDrawingMode && drawTool !== 'eraser', '#7c6fff', '#4a90d9')}>✏️ Pen</button>
+          <button onClick={() => { setIsHighlightMode(!isHighlightMode); setIsDrawingMode(false); setActiveMenu(null); }} style={tb.pill(isHighlightMode, '#ff9f43', '#ee5a24')}>🖍️ Highlighter</button>
+          <div style={{ position: 'relative' }}>
+            <button onClick={() => { if (isDrawingMode && drawTool === 'eraser') setActiveMenu(activeMenu === 'eraser' ? null : 'eraser'); else { setIsDrawingMode(true); setIsHighlightMode(false); setDrawTool('eraser'); setActiveMenu(null); } }} style={tb.pill(isDrawingMode && drawTool === 'eraser', '#ff4757', '#c0392b')}>🧽 {eraserMode === 'precision' ? 'Precision' : 'Stroke'} Eraser ▼</button>
+            {activeMenu === 'eraser' && (
+              <div style={popoverStyle}>
+                <button onClick={() => { setEraserMode('precision'); setDrawTool('eraser'); setActiveMenu(null); }} style={tb.toolBtn(eraserMode === 'precision')}>🎯 Precision Eraser</button>
+                <button onClick={() => { setEraserMode('stroke'); setDrawTool('eraser'); setActiveMenu(null); }} style={tb.toolBtn(eraserMode === 'stroke')}>🌊 Stroke Eraser</button>
               </div>
-              <div style={tb.sep} /><button onClick={() => handleUndo(activeCanvasIndex.current || 0)} style={tb.pill(false, '#f1f2f6')}>↩️ Undo</button>
-              <div style={tb.sep} /><button onClick={manualSaveToCloud} style={tb.pill(hasUnsavedChanges, '#2ed573', '#27ae60')} disabled={isSaving}>{isSaving ? '⏳ Saving...' : hasUnsavedChanges ? '💾 Save Now' : '☁️ Saved'}</button>
-            </>
+            )}
+          </div>
+          <div style={tb.sep} />
+          <button onClick={() => handleUndo(activeCanvasIndex.current || 0)} style={tb.undoBtn(true)}>↩</button>
+          <button onClick={() => handleRedo(activeCanvasIndex.current || 0)} style={tb.undoBtn(true)}>↪</button>
+          <div style={tb.sep} />
+          <button onClick={manualSaveToCloud} style={tb.pill(hasUnsavedChanges, '#ff9800', '#e67e22')} disabled={isSaving}>{isSaving ? '⏳' : '💾'} {hasUnsavedChanges ? 'Save' : 'Saved'}</button>
+          
+          {isHighlightMode && (
+            <><div style={tb.sep} /><div style={{ position: 'relative' }}>
+              <button onClick={() => setActiveMenu(activeMenu === 'hColor' ? null : 'hColor')} style={tb.card}><div style={tb.dot(true, highlightColor)} /> ▼</button>
+              {activeMenu === 'hColor' && <div style={popoverStyle}>{hlColors.map(({ c, n }) => <button key={c} title={n} onClick={() => { setHighlightColor(c); setActiveMenu(null); }} style={tb.dot(highlightColor === c, c)} />)}</div>}
+            </div></>
+          )}
+
+          {isDrawingMode && drawTool !== 'eraser' && (
+            <><div style={tb.sep} /><div style={{ position: 'relative' }}>
+              <button onClick={() => setActiveMenu(activeMenu === 'tool' ? null : 'tool')} style={tb.toolBtn(true)}>{tools.find(t => t.v === drawTool)?.icon} ▼</button>
+              {activeMenu === 'tool' && <div style={popoverStyle}>{tools.map(({ v, icon, label }) => <button key={v} title={label} onClick={() => { setDrawTool(v); setActiveMenu(null); }} style={tb.toolBtn(drawTool === v)}>{icon}</button>)}</div>}
+            </div>
+            <div style={{ position: 'relative' }}>
+              <button onClick={() => setActiveMenu(activeMenu === 'color' ? null : 'color')} style={tb.card}><div style={tb.dot(true, penColor)} /> ▼</button>
+              {activeMenu === 'color' && <div style={popoverStyle}>{penColors.map(({ c, n }) => <button key={c} title={n} onClick={() => { setPenColor(c); setActiveMenu(null); }} style={tb.dot(penColor === c, c)} />)}</div>}
+            </div>
+            <div style={{ position: 'relative' }}>
+              <button onClick={() => setActiveMenu(activeMenu === 'size' ? null : 'size')} style={tb.card}><div style={{ width: '8px', height: '8px', backgroundColor: penColor, borderRadius: '50%' }} /><span style={{ fontSize: "0.7rem", color: "#ccc" }}>{penWidth}</span> ▼</button>
+              {activeMenu === 'size' && <div style={{ ...popoverStyle, padding: "12px", width: "160px" }}><input type="range" min="1" max="20" value={penWidth} onChange={(e) => setPenWidth(Number(e.target.value))} style={{ width: "100%", accentColor: "#7c6fff" }} /></div>}
+            </div></>
           )}
         </div>
       </div>
 
-      <div style={{ maxWidth: '800px', margin: '40px auto 0', background: 'white', padding: '3rem', borderRadius: '8px', boxShadow: '0 4px 20px rgba(0,0,0,0.08)', position: 'relative' }}>
+      <div id="ebook-card" style={{ maxWidth: '750px', margin: '40px auto 0', background: 'white', padding: '40px', borderRadius: '12px', boxShadow: '0 2px 10px rgba(0,0,0,0.05)', border: '1px solid #eee', position: 'relative' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2.5rem', borderBottom: '1px solid #eee', paddingBottom: '1rem' }}>
           <div><span style={{ fontSize: '0.9rem', color: '#7c6fff', fontWeight: 'bold', textTransform: 'uppercase' }}>{chapterData.bookTitle}</span><h1 style={{ margin: '0', fontSize: '2rem', color: '#1a237e' }}>{chapterData.title}</h1></div>
           <button onClick={() => navigate('/ebooks')} style={{ padding: '8px 16px', background: '#f0f0f0', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', color: '#666' }}>✕ Close</button>
