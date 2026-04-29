@@ -528,7 +528,14 @@ function EbookReader() {
         </div>
         
         <div id="content-area" ref={contentAreaRef} 
-          style={{ fontSize: '1.1rem', position: 'relative', touchAction: isDrawingMode ? 'pinch-zoom' : 'auto' }}
+          style={{ 
+            fontSize: '1.1rem', 
+            position: 'relative', 
+            touchAction: isDrawingMode ? 'pinch-zoom' : 'auto',
+            userSelect: isDrawingMode ? 'none' : 'auto',
+            WebkitUserSelect: isDrawingMode ? 'none' : 'auto',
+            WebkitTouchCallout: 'none'
+          }}
         >
           {chapterData.content.map((item, index) => renderContent(item, index))}
           {isInitialLoadComplete && (
