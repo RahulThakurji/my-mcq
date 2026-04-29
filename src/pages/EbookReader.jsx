@@ -460,14 +460,14 @@ function EbookReader() {
           <div 
             ref={el => textRefs.current[index] = el} 
             onPointerUp={() => handleMouseUp(index)} 
-            style={{ position: 'relative', zIndex: 1, userSelect: isHighlightMode ? 'text' : 'none' }}
+            style={{ position: 'relative', zIndex: 1, userSelect: isHighlightMode ? 'text' : 'none', pointerEvents: isDrawingMode ? 'none' : 'auto' }}
             dangerouslySetInnerHTML={{ __html: savedContent[index] }}
           />
         ) : (
           <div 
             ref={el => textRefs.current[index] = el} 
             onPointerUp={() => handleMouseUp(index)} 
-            style={{ position: 'relative', zIndex: 1, userSelect: isHighlightMode ? 'text' : 'none' }}
+            style={{ position: 'relative', zIndex: 1, userSelect: isHighlightMode ? 'text' : 'none', pointerEvents: isDrawingMode ? 'none' : 'auto' }}
           >
             {defaultContent}
           </div>
