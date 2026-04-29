@@ -14,11 +14,13 @@ function EbookReader() {
 
   // --- States ---
   const [isHighlightMode, setIsHighlightMode] = useState(false);
+  const [highlightColor, setHighlightColor] = useState('#FFF800');
   const [activeMenu, setActiveMenu] = useState(null);
   const [savedContent, setSavedContent] = useState({}); 
   const [isInitialLoadComplete, setIsInitialLoadComplete] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const isDrawingMode = false; // Constant since canvas is removed
 
   // --- Refs ---
   const canvasRef = useRef(null);
@@ -103,14 +105,14 @@ function EbookReader() {
           <div 
             ref={el => textRefs.current[index] = el} 
             onPointerUp={() => handleMouseUp(index)} 
-            style={{ position: 'relative', zIndex: 1, userSelect: isHighlightMode ? 'text' : 'none', pointerEvents: isDrawingMode ? 'none' : 'auto' }}
+            style={{ position: 'relative', zIndex: 1, userSelect: isHighlightMode ? 'text' : 'auto', pointerEvents: 'auto' }}
             dangerouslySetInnerHTML={{ __html: savedContent[index] }}
           />
         ) : (
           <div 
             ref={el => textRefs.current[index] = el} 
             onPointerUp={() => handleMouseUp(index)} 
-            style={{ position: 'relative', zIndex: 1, userSelect: isHighlightMode ? 'text' : 'none', pointerEvents: isDrawingMode ? 'none' : 'auto' }}
+            style={{ position: 'relative', zIndex: 1, userSelect: isHighlightMode ? 'text' : 'auto', pointerEvents: 'auto' }}
           >
             {defaultContent}
           </div>
@@ -124,7 +126,7 @@ function EbookReader() {
   };
 
   return (
-    <div style={{ minHeight: '100vh', background: '#f8f9fa', paddingBottom: '100px', userSelect: 'none' }}>
+    <div style={{ minHeight: '100vh', background: '#f8f9fa', paddingBottom: '100px' }}>
       <div style={{ position: 'fixed', bottom: '30px', left: '50%', transform: 'translateX(-50%)', zIndex: 10001 }}>
         <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', background: 'rgba(23, 25, 35, 0.85)', backdropFilter: 'blur(12px)', padding: '8px 12px', borderRadius: '16px', border: '1px solid rgba(255,255,255,0.1)' }}>
           <button onClick={() => { setIsHighlightMode(!isHighlightMode); setActiveMenu(null); }} style={tb.pill(isHighlightMode, '#ff9f43', '#ee5a24')}>🖍️ Highlighter</button>
