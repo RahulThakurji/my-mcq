@@ -290,15 +290,19 @@ function EbookReader() {
       if (isSnapped.current) return;
       const pCanvas = previewCanvasRef.current; const pCtx = pCanvas?.getContext('2d');
       if (pCtx) {
+        pCtx.imageSmoothingEnabled = false;
         pCtx.clearRect(0, 0, pCanvas.width, pCanvas.height);
         const stroke = getStroke(pts, { size: penWidth, thinning: 0.2, smoothing: 0.8, streamline: 0.8, simulatePressure: e.nativeEvent.pointerType !== 'pen' });
         const pathData = getSvgPathFromStroke(stroke); const path = new Path2D(pathData);
-        pCtx.fillStyle = penColor; pCtx.fill(path);
+        pCtx.fillStyle = penColor; 
+        pCtx.shadowBlur = 0.5; pCtx.shadowColor = penColor;
+        pCtx.fill(path);
       }
       clearTimeout(holdTimeout.current);
       holdTimeout.current = setTimeout(() => { if (isDrawing.current && !isSnapped.current) snapShape(); }, 600);
     } else {
       ctx.putImageData(snapshot.current, 0, 0); ctx.beginPath(); ctx.strokeStyle = penColor; ctx.lineWidth = penWidth;
+      ctx.shadowBlur = 1; ctx.shadowColor = penColor;
       if (drawTool === 'line') { ctx.moveTo(startX.current, startY.current); ctx.lineTo(offsetX, offsetY); }
       else if (drawTool === 'rectangle') { ctx.rect(startX.current, startY.current, offsetX - startX.current, offsetY - startY.current); }
       else if (drawTool === 'circle') { ctx.arc(startX.current, startY.current, Math.hypot(offsetX - startX.current, offsetY - startY.current), 0, 2 * Math.PI); }
@@ -306,14 +310,29 @@ function EbookReader() {
     }
   };
 
-  const stopDrawing = () => {
+  const stopDrawing = (e) => {
     if (!isDrawing.current) return;
-    clearTimeout(holdTimeout.current); isDrawing.current = false;
+    clearTimeout(holdTimeout.current);
+    
+    // Tap-to-interact logic from Quiz.jsx
+    if (e) {
+      const { clientX, clientY } = e.nativeEvent;
+      const dist = Math.hypot(clientX - lastPos.current.x, clientY - lastPos.current.y);
+      if (dist < 5) {
+        const elements = document.elementsFromPoint(clientX, clientY);
+        const targetBtn = elements.find(el => el.tagName === 'BUTTON' || el.getAttribute('role') === 'button');
+        if (targetBtn) { targetBtn.click(); isDrawing.current = false; return; }
+      }
+    }
+
+    isDrawing.current = false;
     const canvas = canvasRef.current;
     
     if (canvas) {
       if (drawTool === 'eraser' && eraserMode === 'stroke') {
-        // Already handled in draw()
+        // Already handled
+      } else if (isSnapped.current) {
+        // Already handled by snapShape()
       } else {
         const newStroke = {
           points: [...strokePoints.current],
@@ -509,11 +528,11 @@ function EbookReader() {
             activePointers.current.delete(e.pointerId); 
             if (isDrawing.current) { 
               try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { } 
-              stopDrawing(); 
+              stopDrawing(e); 
             } 
           }}
           onPointerLeave={(e) => { 
-            if (isDrawing.current && activePointers.current.size <= 1) stopDrawing(); 
+            if (isDrawing.current && activePointers.current.size <= 1) stopDrawing(e); 
           }}
           onPointerCancel={(e) => { 
             activePointers.current.delete(e.pointerId); 
