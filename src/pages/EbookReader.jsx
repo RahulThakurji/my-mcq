@@ -605,7 +605,7 @@ function EbookReader() {
                   position: "absolute", top: 0, left: 0, 
                   zIndex: isDrawingMode ? 101 : 2, 
                   pointerEvents: isDrawingMode ? 'auto' : 'none', 
-                  opacity: 1, touchAction: 'none',
+                  opacity: 1, touchAction: isDrawingMode ? 'pinch-zoom' : 'auto',
                   userSelect: 'none', WebkitUserSelect: 'none'
                 }} 
               />
