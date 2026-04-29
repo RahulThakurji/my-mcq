@@ -385,6 +385,13 @@ function EbookReader() {
         redrawCanvas(canvas, nextStrokes);
         queueUpdate({ strokes: nextStrokes });
       }
+      
+      // Fix: Ensure preview canvas is cleared after baking the stroke
+      const pCanvas = previewCanvasRef.current;
+      if (pCanvas) {
+        const pCtx = pCanvas.getContext('2d');
+        pCtx.clearRect(0, 0, pCanvas.width, pCanvas.height);
+      }
     }
 
     if (isHighlightErased.current) {
@@ -569,7 +576,6 @@ function EbookReader() {
               <canvas 
                 ref={previewCanvasRef} 
                 onPointerDown={(e) => { 
-                  e.preventDefault();
                   activePointers.current.set(e.pointerId, e.pointerType);
                   const touches = Array.from(activePointers.current.values()).filter(t => t === 'touch');
                   const pens = Array.from(activePointers.current.values()).filter(t => t === 'pen');
@@ -581,21 +587,23 @@ function EbookReader() {
                   } 
                 }}
                 onPointerMove={(e) => { 
-                  e.preventDefault();
-                  const touches = Array.from(activePointers.current.values()).filter(t => t === 'touch');
-                  if (touches.length > 1) { abortDrawing(); return; }
-                  if (isDrawing.current) draw(e); 
+                  if (isDrawing.current && e.pointerId === drawingPointerId.current) {
+                    e.preventDefault();
+                    draw(e); 
+                  } else {
+                    const touches = Array.from(activePointers.current.values()).filter(t => t === 'touch');
+                    if (touches.length > 1) abortDrawing();
+                  }
                 }}
                 onPointerUp={(e) => { 
-                  e.preventDefault();
                   activePointers.current.delete(e.pointerId); 
-                  if (isDrawing.current) { 
+                  if (isDrawing.current && e.pointerId === drawingPointerId.current) { 
                     try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { } 
                     stopDrawing(e); 
                   } 
                 }}
                 onPointerLeave={(e) => { 
-                  if (isDrawing.current && activePointers.current.size <= 1) stopDrawing(e); 
+                  if (isDrawing.current && e.pointerId === drawingPointerId.current) stopDrawing(e); 
                 }}
                 onPointerCancel={(e) => { 
                   activePointers.current.delete(e.pointerId); 
@@ -605,7 +613,7 @@ function EbookReader() {
                   position: "absolute", top: 0, left: 0, 
                   zIndex: isDrawingMode ? 101 : 2, 
                   pointerEvents: isDrawingMode ? 'auto' : 'none', 
-                  opacity: 1, touchAction: isDrawingMode ? 'pinch-zoom' : 'auto',
+                  opacity: 1, touchAction: 'none',
                   userSelect: 'none', WebkitUserSelect: 'none'
                 }} 
               />
