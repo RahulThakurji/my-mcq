@@ -460,14 +460,14 @@ function EbookReader() {
           <div 
             ref={el => textRefs.current[index] = el} 
             onPointerUp={() => handleMouseUp(index)} 
-            style={{ position: 'relative', zIndex: 1, userSelect: isHighlightMode ? 'text' : 'none', pointerEvents: isDrawingMode ? 'none' : 'auto' }}
+            style={{ position: 'relative', zIndex: 1, userSelect: isHighlightMode ? 'text' : 'none' }}
             dangerouslySetInnerHTML={{ __html: savedContent[index] }}
           />
         ) : (
           <div 
             ref={el => textRefs.current[index] = el} 
             onPointerUp={() => handleMouseUp(index)} 
-            style={{ position: 'relative', zIndex: 1, userSelect: isHighlightMode ? 'text' : 'none', pointerEvents: isDrawingMode ? 'none' : 'auto' }}
+            style={{ position: 'relative', zIndex: 1, userSelect: isHighlightMode ? 'text' : 'none' }}
           >
             {defaultContent}
           </div>
@@ -525,43 +525,54 @@ function EbookReader() {
         </div>
         
         <div id="content-area" ref={contentAreaRef} 
-          onPointerDown={(e) => { 
-            activePointers.current.set(e.pointerId, e.pointerType);
-            const touches = Array.from(activePointers.current.values()).filter(t => t === 'touch');
-            const pens = Array.from(activePointers.current.values()).filter(t => t === 'pen');
-            
-            if (touches.length > 1) { abortDrawing(); return; }
-            if (isDrawingMode) {
-              if (e.pointerType === 'touch' && pens.length > 0) return;
-              try { e.currentTarget.setPointerCapture(e.pointerId); } catch { }
-              startDrawing(e); 
-            } 
-          }}
-          onPointerMove={(e) => { 
-            const touches = Array.from(activePointers.current.values()).filter(t => t === 'touch');
-            if (touches.length > 1) { abortDrawing(); return; }
-            if (isDrawing.current) draw(e); 
-          }}
-          onPointerUp={(e) => { 
-            activePointers.current.delete(e.pointerId); 
-            if (isDrawing.current) { 
-              try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { } 
-              stopDrawing(e); 
-            } 
-          }}
-          onPointerLeave={(e) => { 
-            if (isDrawing.current && activePointers.current.size <= 1) stopDrawing(e); 
-          }}
-          onPointerCancel={(e) => { 
-            activePointers.current.delete(e.pointerId); 
-            abortDrawing(); 
-          }}
           style={{ fontSize: '1.1rem', position: 'relative', touchAction: isDrawingMode ? 'pinch-zoom' : 'auto' }}
         >
           {chapterData.content.map((item, index) => renderContent(item, index))}
           {isInitialLoadComplete && (
-            <><canvas ref={canvasRef} style={{ position: "absolute", top: 0, left: 0, zIndex: isDrawingMode ? 100 : 2, pointerEvents: 'none', opacity: 1 }} />
-            <canvas ref={previewCanvasRef} style={{ position: "absolute", top: 0, left: 0, zIndex: isDrawingMode ? 101 : 2, pointerEvents: "none", opacity: 1 }} /></>
+            <><canvas 
+                ref={canvasRef} 
+                style={{ position: "absolute", top: 0, left: 0, zIndex: isDrawingMode ? 100 : 2, pointerEvents: 'none', opacity: 1 }} 
+              />
+              <canvas 
+                ref={previewCanvasRef} 
+                onPointerDown={(e) => { 
+                  activePointers.current.set(e.pointerId, e.pointerType);
+                  const touches = Array.from(activePointers.current.values()).filter(t => t === 'touch');
+                  const pens = Array.from(activePointers.current.values()).filter(t => t === 'pen');
+                  if (touches.length > 1) { abortDrawing(); return; }
+                  if (isDrawingMode) {
+                    if (e.pointerType === 'touch' && pens.length > 0) return;
+                    try { e.currentTarget.setPointerCapture(e.pointerId); } catch { }
+                    startDrawing(e); 
+                  } 
+                }}
+                onPointerMove={(e) => { 
+                  const touches = Array.from(activePointers.current.values()).filter(t => t === 'touch');
+                  if (touches.length > 1) { abortDrawing(); return; }
+                  if (isDrawing.current) draw(e); 
+                }}
+                onPointerUp={(e) => { 
+                  activePointers.current.delete(e.pointerId); 
+                  if (isDrawing.current) { 
+                    try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { } 
+                    stopDrawing(e); 
+                  } 
+                }}
+                onPointerLeave={(e) => { 
+                  if (isDrawing.current && activePointers.current.size <= 1) stopDrawing(e); 
+                }}
+                onPointerCancel={(e) => { 
+                  activePointers.current.delete(e.pointerId); 
+                  abortDrawing(); 
+                }}
+                style={{ 
+                  position: "absolute", top: 0, left: 0, 
+                  zIndex: isDrawingMode ? 101 : 2, 
+                  pointerEvents: isDrawingMode ? 'auto' : 'none', 
+                  opacity: 1, touchAction: 'none' 
+                }} 
+              />
+            </>
           )}
         </div>
 
