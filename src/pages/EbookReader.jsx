@@ -207,6 +207,10 @@ function EbookReader() {
     if (activePointerType.current === 'pen' && nativeEvent.pointerType === 'touch') return;
     activePointerType.current = nativeEvent.pointerType;
     const canvas = canvasRef.current; if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const offsetX = nativeEvent.clientX - rect.left; const offsetY = nativeEvent.clientY - rect.top;
+    const ctx = canvas.getContext('2d');
+    
     isSnapped.current = false; startX.current = offsetX; startY.current = offsetY;
     lastPos.current = { x: nativeEvent.clientX, y: nativeEvent.clientY };
     const state = ctx.getImageData(0, 0, canvas.width, canvas.height);
