@@ -1,7 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { getStroke } from 'perfect-freehand';
 
-function getSvgPathFromStroke(stroke) {
+export function getSvgPathFromStroke(stroke) {
     if (!stroke.length) return "";
     const d = stroke.reduce(
         (acc, [x0, y0], i, arr) => {
@@ -18,15 +18,16 @@ function getSvgPathFromStroke(stroke) {
 export default function GlobalCanvas({
     containerRef,
     isDrawingMode,
-    tool = 'pen',
-    color = '#FF003C',
-    lineWidth = 3,
+    drawTool = 'pen',
+    penColor = '#FF003C',
+    penWidth = 3,
     eraserMode = 'precision',
     strokes = [],
     setStrokes,
     onStrokeStart,
     onStrokeEnd,
     onPointerErase,
+    onTap,
     zIndex = 100
 }) {
     const canvasRef = useRef(null);
@@ -43,6 +44,7 @@ export default function GlobalCanvas({
     const activePointerType = useRef(null);
     const activePointers = useRef(new Map());
     const drawingPointerId = useRef(null);
+    const lastPos = useRef({ x: 0, y: 0 });
 
     const redrawCanvas = (canvas, strokeList) => {
         if (!canvas) return;
@@ -82,7 +84,7 @@ export default function GlobalCanvas({
         });
     };
 
-    // Resize Observer to match parent container automatically
+    // Auto-resize based on parent container
     useEffect(() => {
         const container = containerRef?.current;
         if (!container) return;
@@ -98,12 +100,10 @@ export default function GlobalCanvas({
 
             if (canvas.width !== tw || canvas.height !== th) {
                 canvas.width = tw; canvas.height = th;
-                canvas.style.width = `${container.offsetWidth}px`;
-                canvas.style.height = `${container.offsetHeight}px`;
+                canvas.style.width = `${container.offsetWidth}px`; canvas.style.height = `${container.offsetHeight}px`;
 
                 pCanvas.width = tw; pCanvas.height = th;
-                pCanvas.style.width = `${container.offsetWidth}px`;
-                pCanvas.style.height = `${container.offsetHeight}px`;
+                pCanvas.style.width = `${container.offsetWidth}px`; pCanvas.style.height = `${container.offsetHeight}px`;
 
                 redrawCanvas(canvas, strokes);
             }
@@ -111,7 +111,7 @@ export default function GlobalCanvas({
 
         const observer = new ResizeObserver(handleResize);
         observer.observe(container);
-        handleResize(); // Initial sizing
+        handleResize();
 
         return () => observer.disconnect();
     }, [containerRef, strokes]);
@@ -119,9 +119,11 @@ export default function GlobalCanvas({
     const snapShape = () => {
         const points = strokePoints.current;
         if (points.length < 15) return;
-        const start = points[0]; const end = points[points.length - 1];
-        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
 
+        const start = points[0];
+        const end = points[points.length - 1];
+
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
         for (let p of points) {
             if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x;
             if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y;
@@ -135,8 +137,8 @@ export default function GlobalCanvas({
         const ctx = canvas.getContext('2d');
         ctx.putImageData(preStrokeSnapshot.current, 0, 0);
         ctx.beginPath();
-        ctx.globalAlpha = 1.0; ctx.strokeStyle = color; ctx.lineWidth = lineWidth;
-        ctx.shadowBlur = 1; ctx.shadowColor = color;
+        ctx.globalAlpha = 1.0; ctx.strokeStyle = penColor; ctx.lineWidth = penWidth;
+        ctx.shadowBlur = 1; ctx.shadowColor = penColor;
 
         const isClosedShape = gap < diag * 0.3;
         if (isClosedShape) {
@@ -145,7 +147,9 @@ export default function GlobalCanvas({
                 const centerX = minX + width / 2; const centerY = minY + height / 2;
                 const radius = Math.max(width, height) / 2;
                 ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
-            } else ctx.rect(minX, minY, width, height);
+            } else {
+                ctx.rect(minX, minY, width, height);
+            }
         } else {
             ctx.moveTo(start.x, start.y); ctx.lineTo(end.x, end.y);
         }
@@ -155,7 +159,7 @@ export default function GlobalCanvas({
     const startDrawing = (e) => {
         const { nativeEvent } = e;
         if (!isDrawingMode) return;
-        if (activePointerType.current === 'pen' && nativeEvent.pointerType === 'touch') return; // Palm rejection
+        if (activePointerType.current === 'pen' && nativeEvent.pointerType === 'touch') return;
 
         activePointerType.current = nativeEvent.pointerType;
         drawingPointerId.current = nativeEvent.pointerId;
@@ -166,6 +170,8 @@ export default function GlobalCanvas({
         const offsetY = nativeEvent.clientY - rect.top;
 
         isSnapped.current = false; startX.current = offsetX; startY.current = offsetY;
+        lastPos.current = { x: nativeEvent.clientX, y: nativeEvent.clientY };
+
         const ctx = canvas.getContext('2d');
         const state = ctx.getImageData(0, 0, canvas.width, canvas.height);
         preStrokeSnapshot.current = state; snapshot.current = state;
@@ -177,10 +183,14 @@ export default function GlobalCanvas({
 
         const pCanvas = previewCanvasRef.current;
         if (pCanvas) {
+            const ratio = window.devicePixelRatio || 1;
+            pCanvas.width = canvas.width; pCanvas.height = canvas.height;
+            pCanvas.style.width = canvas.style.width; pCanvas.style.height = canvas.style.height;
+
             const pCtx = pCanvas.getContext('2d');
             pCtx.imageSmoothingEnabled = false;
             pCtx.setTransform(1, 0, 0, 1, 0, 0);
-            pCtx.scale(window.devicePixelRatio || 1, window.devicePixelRatio || 1);
+            pCtx.scale(ratio, ratio);
             pCtx.clearRect(0, 0, canvas.width, canvas.height);
         }
     };
@@ -191,10 +201,9 @@ export default function GlobalCanvas({
         const offsetX = e.nativeEvent.clientX - rect.left; const offsetY = e.nativeEvent.clientY - rect.top;
         strokePoints.current.push({ x: offsetX, y: offsetY, pressure: e.nativeEvent.pressure || 0.5 });
 
-        const pts = strokePoints.current;
-        const ctx = canvas.getContext('2d');
+        const pts = strokePoints.current; const ctx = canvas.getContext('2d');
 
-        if (tool === 'eraser' && eraserMode === 'stroke') {
+        if (drawTool === 'eraser' && eraserMode === 'stroke') {
             const eraserRadius = 30; let hit = false;
             const nextStrokes = strokes.filter(s => {
                 const isHit = s.points.some(p => Math.hypot(p.x - offsetX, p.y - offsetY) < eraserRadius);
@@ -206,30 +215,30 @@ export default function GlobalCanvas({
                 redrawCanvas(canvas, nextStrokes);
             }
             if (onPointerErase) onPointerErase(e.nativeEvent.clientX, e.nativeEvent.clientY);
-        } else if (tool === 'eraser') {
+        } else if (drawTool === 'eraser') {
             ctx.globalCompositeOperation = 'destination-out'; ctx.lineWidth = 25; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
             ctx.beginPath(); ctx.moveTo(startX.current, startY.current); ctx.lineTo(offsetX, offsetY); ctx.stroke();
             startX.current = offsetX; startY.current = offsetY;
             if (onPointerErase) onPointerErase(e.nativeEvent.clientX, e.nativeEvent.clientY);
-        } else if (tool === 'pen') {
+        } else if (drawTool === 'pen') {
             if (isSnapped.current) return;
             const pCanvas = previewCanvasRef.current; const pCtx = pCanvas?.getContext('2d');
             if (pCtx) {
                 pCtx.imageSmoothingEnabled = false;
                 pCtx.clearRect(0, 0, pCanvas.width, pCanvas.height);
-                const stroke = getStroke(pts, { size: lineWidth, thinning: 0.2, smoothing: 0.8, streamline: 0.8, simulatePressure: e.nativeEvent.pointerType !== 'pen' });
+                const stroke = getStroke(pts, { size: penWidth, thinning: 0.2, smoothing: 0.8, streamline: 0.8, simulatePressure: e.nativeEvent.pointerType !== 'pen' });
                 const pathData = getSvgPathFromStroke(stroke); const path = new Path2D(pathData);
-                pCtx.fillStyle = color; pCtx.shadowBlur = 0.5; pCtx.shadowColor = color;
+                pCtx.fillStyle = penColor; pCtx.shadowBlur = 0.5; pCtx.shadowColor = penColor;
                 pCtx.fill(path);
             }
             clearTimeout(holdTimeout.current);
             holdTimeout.current = setTimeout(() => { if (isDrawing.current && !isSnapped.current) snapShape(); }, 600);
         } else {
-            ctx.putImageData(snapshot.current, 0, 0); ctx.beginPath(); ctx.strokeStyle = color; ctx.lineWidth = lineWidth;
-            ctx.shadowBlur = 1; ctx.shadowColor = color;
-            if (tool === 'line') { ctx.moveTo(startX.current, startY.current); ctx.lineTo(offsetX, offsetY); }
-            else if (tool === 'rectangle') { ctx.rect(startX.current, startY.current, offsetX - startX.current, offsetY - startY.current); }
-            else if (tool === 'circle') { ctx.arc(startX.current, startY.current, Math.hypot(offsetX - startX.current, offsetY - startY.current), 0, 2 * Math.PI); }
+            ctx.putImageData(snapshot.current, 0, 0); ctx.beginPath(); ctx.strokeStyle = penColor; ctx.lineWidth = penWidth;
+            ctx.shadowBlur = 1; ctx.shadowColor = penColor;
+            if (drawTool === 'line') { ctx.moveTo(startX.current, startY.current); ctx.lineTo(offsetX, offsetY); }
+            else if (drawTool === 'rectangle') { ctx.rect(startX.current, startY.current, offsetX - startX.current, offsetY - startY.current); }
+            else if (drawTool === 'circle') { ctx.arc(startX.current, startY.current, Math.hypot(offsetX - startX.current, offsetY - startY.current), 0, 2 * Math.PI); }
             ctx.stroke();
         }
     };
@@ -248,23 +257,41 @@ export default function GlobalCanvas({
         if (!isDrawing.current || (e && e.nativeEvent.pointerId !== drawingPointerId.current)) return;
         drawingPointerId.current = null;
         clearTimeout(holdTimeout.current);
+
+        // Tap-to-interact callback
+        if (e && onTap) {
+            const { clientX, clientY } = e.nativeEvent;
+            const dist = Math.hypot(clientX - lastPos.current.x, clientY - lastPos.current.y);
+            if (dist < 5) {
+                onTap(e);
+                isDrawing.current = false;
+                return;
+            }
+        }
+
         isDrawing.current = false;
         const canvas = canvasRef.current;
 
         if (canvas) {
             let nextStrokes = strokes;
-            if (tool !== 'eraser' || eraserMode !== 'stroke') {
+            if (drawTool !== 'eraser' || eraserMode !== 'stroke') {
                 if (!isSnapped.current) {
                     const newStroke = {
-                        points: [...strokePoints.current], tool, color,
-                        width: tool === 'eraser' ? 25 : lineWidth, id: Date.now()
+                        points: [...strokePoints.current],
+                        tool: drawTool,
+                        color: penColor,
+                        width: drawTool === 'eraser' ? 25 : penWidth,
+                        id: Date.now()
                     };
                     nextStrokes = [...strokes, newStroke];
                     setStrokes(nextStrokes);
                     redrawCanvas(canvas, nextStrokes);
                 }
             }
-            if (previewCanvasRef.current) previewCanvasRef.current.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+
+            const pCanvas = previewCanvasRef.current;
+            if (pCanvas) pCanvas.getContext('2d').clearRect(0, 0, pCanvas.width, pCanvas.height);
+
             if (onStrokeEnd) onStrokeEnd(nextStrokes);
         }
     };
@@ -295,7 +322,8 @@ export default function GlobalCanvas({
                 }}
                 onPointerMove={(e) => {
                     if (isDrawing.current && e.pointerId === drawingPointerId.current) {
-                        e.preventDefault(); draw(e);
+                        e.preventDefault();
+                        draw(e);
                     } else {
                         const touches = Array.from(activePointers.current.values()).filter(t => t === 'touch');
                         if (touches.length > 1) abortDrawing();
@@ -312,7 +340,8 @@ export default function GlobalCanvas({
                     if (isDrawing.current && e.pointerId === drawingPointerId.current) stopDrawing(e);
                 }}
                 onPointerCancel={(e) => {
-                    activePointers.current.delete(e.pointerId); abortDrawing();
+                    activePointers.current.delete(e.pointerId);
+                    abortDrawing();
                 }}
                 style={{
                     position: "absolute", top: 0, left: 0,

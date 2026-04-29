@@ -177,14 +177,20 @@ function EbookReader() {
              <GlobalCanvas 
                 containerRef={contentAreaRef}
                 isDrawingMode={isDrawingMode}
-                tool={drawTool}
-                color={penColor}
-                lineWidth={penWidth}
+                drawTool={drawTool}
+                penColor={penColor}
+                penWidth={penWidth}
                 eraserMode={eraserMode}
                 strokes={strokes}
                 setStrokes={(newStrokes) => {
                    setStrokes(newStrokes);
                    setHasUnsavedChanges(true);
+                }}
+                onTap={(e) => {
+                  const { clientX, clientY } = e.nativeEvent;
+                  const elements = document.elementsFromPoint(clientX, clientY);
+                  const targetBtn = elements.find(el => el.tagName === 'BUTTON' || el.getAttribute('role') === 'button');
+                  if (targetBtn) targetBtn.click();
                 }}
              />
           )}
