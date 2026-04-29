@@ -6,7 +6,7 @@ import LatexRenderer from '../components/LatexRenderer';
 import { doc, setDoc, updateDoc, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../context/AuthContext';
-import AnnotationCanvas from '../components/AnnotationCanvas';
+import GlobalCanvas from '../components/GlobalCanvas';
 import AnnotationToolbar from '../components/AnnotationToolbar';
 
 function EbookReader() {
@@ -22,7 +22,7 @@ function EbookReader() {
   const [penWidth, setPenWidth] = useState(3);
   const [activeMenu, setActiveMenu] = useState(null);
   const [eraserMode, setEraserMode] = useState('precision');
-  const [canvasData, setCanvasData] = useState(null); 
+  const [strokes, setStrokes] = useState([]); 
   const [savedContent, setSavedContent] = useState({}); 
   const [historyState, setHistoryState] = useState({ undo: 0, redo: 0 });
   const [isInitialLoadComplete, setIsInitialLoadComplete] = useState(false);
@@ -49,11 +49,11 @@ function EbookReader() {
     const unsubscribe = onSnapshot(docRef, (docSnap) => {
       if (docSnap.exists() && !docSnap.metadata.hasPendingWrites) {
         const data = docSnap.data();
-        if (data.drawingData !== undefined) setCanvasData(data.drawingData);
+        if (data.strokes !== undefined) setStrokes(data.strokes || []);
         if (data.savedContent !== undefined) setSavedContent(data.savedContent);
       } else if (!docSnap.exists()) {
-        setCanvasData(null); setSavedContent({});
-        setDoc(docRef, { drawingData: null, savedContent: {} }).catch(() => {});
+        setStrokes([]); setSavedContent({});
+        setDoc(docRef, { strokes: [], savedContent: {} }).catch(() => {});
       }
       setIsInitialLoadComplete(true);
     }, () => setIsInitialLoadComplete(true));
@@ -72,9 +72,8 @@ function EbookReader() {
     pendingUpdatesRef.current = {};
     try {
       const docRef = doc(db, 'users', user.uid, 'ebooks', `${ebookId}-${chapterId}`);
-      const drawingData = canvasRef.current?.getData();
       await updateDoc(docRef, { 
-        drawingData: drawingData || null,
+        strokes: strokes,
         savedContent: savedContent,
         lastUpdated: new Date()
       });
@@ -175,16 +174,16 @@ function EbookReader() {
         >
           {chapterData.content.map((item, index) => renderContent(item, index))}
           {isInitialLoadComplete && (
-             <AnnotationCanvas 
-                ref={canvasRef}
-                id={`${ebookId}-${chapterId}`}
+             <GlobalCanvas 
+                containerRef={contentAreaRef}
                 isDrawingMode={isDrawingMode}
-                drawTool={drawTool}
-                penColor={penColor}
-                penWidth={penWidth}
+                tool={drawTool}
+                color={penColor}
+                lineWidth={penWidth}
                 eraserMode={eraserMode}
-                initialData={canvasData}
-                onDrawingUpdate={(data) => {
+                strokes={strokes}
+                setStrokes={(newStrokes) => {
+                   setStrokes(newStrokes);
                    setHasUnsavedChanges(true);
                 }}
              />
