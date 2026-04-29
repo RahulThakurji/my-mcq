@@ -124,6 +124,24 @@ function EbookReader() {
     };
   }, []);
 
+  // --- Selection Lock ---
+  useEffect(() => {
+    if (isDrawingMode) {
+      document.body.style.userSelect = 'none';
+      document.body.style.webkitUserSelect = 'none';
+      document.body.style.webkitTouchCallout = 'none';
+    } else {
+      document.body.style.userSelect = 'auto';
+      document.body.style.webkitUserSelect = 'auto';
+      document.body.style.webkitTouchCallout = 'default';
+    }
+    return () => {
+      document.body.style.userSelect = 'auto';
+      document.body.style.webkitUserSelect = 'auto';
+      document.body.style.webkitTouchCallout = 'default';
+    };
+  }, [isDrawingMode]);
+
   // --- Persistence ---
   useEffect(() => {
     if (!user || !ebookId || !chapterId) { setIsInitialLoadComplete(true); return; }
@@ -541,7 +559,12 @@ function EbookReader() {
           {isInitialLoadComplete && (
             <><canvas 
                 ref={canvasRef} 
-                style={{ position: "absolute", top: 0, left: 0, zIndex: isDrawingMode ? 100 : 2, pointerEvents: 'none', opacity: 1 }} 
+                style={{ 
+                  position: "absolute", top: 0, left: 0, 
+                  zIndex: isDrawingMode ? 100 : 2, 
+                  pointerEvents: 'none', opacity: 1,
+                  userSelect: 'none', WebkitUserSelect: 'none'
+                }} 
               />
               <canvas 
                 ref={previewCanvasRef} 
@@ -582,7 +605,8 @@ function EbookReader() {
                   position: "absolute", top: 0, left: 0, 
                   zIndex: isDrawingMode ? 101 : 2, 
                   pointerEvents: isDrawingMode ? 'auto' : 'none', 
-                  opacity: 1, touchAction: 'none' 
+                  opacity: 1, touchAction: 'none',
+                  userSelect: 'none', WebkitUserSelect: 'none'
                 }} 
               />
             </>
