@@ -2,10 +2,25 @@ import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { historicalBackground } from '../data/ebooks/polity/historicalBackground';
 import { electromagnetism } from '../data/ebooks/physics/electromagnetism';
+import { getStroke } from 'perfect-freehand';
 import LatexRenderer from '../components/LatexRenderer';
 import { doc, setDoc, updateDoc, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../context/AuthContext';
+
+function getSvgPathFromStroke(stroke) {
+  if (!stroke.length) return "";
+  const d = stroke.reduce(
+    (acc, [x0, y0], i, arr) => {
+      const [x1, y1] = arr[(i + 1) % arr.length];
+      acc.push(x0, y0, (x0 + x1) / 2, (y0 + y1) / 2);
+      return acc;
+    },
+    ["M", ...stroke[0], "Q"]
+  );
+  d.push("Z");
+  return d.join(" ");
+}
 
 function EbookReader() {
   const { ebookId, chapterId } = useParams();
@@ -122,11 +137,12 @@ function EbookReader() {
     } finally { setIsSaving(false); }
   };
 
-  // --- Drawing Logic ---
+  // --- Drawing Logic (Same as Quiz.jsx) ---
   const snapShape = () => {
     const points = strokePoints.current;
     if (points.length < 15) return;
-    const start = points[0]; const end = points[points.length - 1];
+    const start = points[0];
+    const end = points[points.length - 1];
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
     for (let p of points) {
       if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x;
@@ -174,7 +190,7 @@ function EbookReader() {
     if (!undoHistoryRefs.current[index]) undoHistoryRefs.current[index] = [];
     undoHistoryRefs.current[index].push({ canvas: state, html: textRefs.current[index]?.innerHTML });
     redoHistoryRefs.current[index] = [];
-    strokePoints.current = [{ x: offsetX, y: offsetY }];
+    strokePoints.current = [{ x: offsetX, y: offsetY, pressure: nativeEvent.pressure || 0.5 }];
     isDrawing.current = true;
     const previewCanvas = previewCanvasRefs.current[index];
     if (previewCanvas) {
@@ -191,8 +207,10 @@ function EbookReader() {
     const rect = canvas.getBoundingClientRect();
     const offsetX = e.nativeEvent.clientX - rect.left;
     const offsetY = e.nativeEvent.clientY - rect.top;
-    strokePoints.current.push({ x: offsetX, y: offsetY });
+    strokePoints.current.push({ x: offsetX, y: offsetY, pressure: e.nativeEvent.pressure || 0.5 });
+    const pts = strokePoints.current;
     const ctx = canvas.getContext('2d');
+
     if (drawTool === 'eraser') {
       if (eraserMode === 'stroke') { clearPage(index); isDrawing.current = false; return; }
       ctx.globalCompositeOperation = 'destination-out'; ctx.lineWidth = 25; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
@@ -202,10 +220,10 @@ function EbookReader() {
       if (textRef) {
         const spans = textRef.querySelectorAll('span[style*="background-color"]');
         spans.forEach(span => {
-          const rects = span.getClientRects();
+          const rcts = span.getClientRects();
           let hit = false;
-          for (let i = 0; i < rects.length; i++) {
-            const r = rects[i];
+          for (let i = 0; i < rcts.length; i++) {
+            const r = rcts[i];
             if (e.nativeEvent.clientX >= r.left - 5 && e.nativeEvent.clientX <= r.right + 5 && e.nativeEvent.clientY >= r.top - 5 && e.nativeEvent.clientY <= r.bottom + 5) { hit = true; break; }
           }
           if (hit) {
@@ -220,17 +238,13 @@ function EbookReader() {
       const pCtx = pCanvas?.getContext('2d');
       if (pCtx) {
         pCtx.clearRect(0, 0, pCanvas.width, pCanvas.height);
-        pCtx.beginPath(); pCtx.strokeStyle = penColor; pCtx.lineWidth = penWidth; pCtx.lineJoin = 'round'; pCtx.lineCap = 'round';
-        const pts = strokePoints.current;
-        if (pts.length > 2) {
-          pCtx.moveTo(pts[0].x, pts[0].y);
-          for (let i = 1; i < pts.length - 2; i++) {
-            const xc = (pts[i].x + pts[i + 1].x) / 2; const yc = (pts[i].y + pts[i + 1].y) / 2;
-            pCtx.quadraticCurveTo(pts[i].x, pts[i].y, xc, yc);
-          }
-          pCtx.quadraticCurveTo(pts[pts.length - 2].x, pts[pts.length - 2].y, pts[pts.length - 1].x, pts[pts.length - 1].y);
-        }
-        pCtx.stroke();
+        const stroke = getStroke(pts, {
+          size: penWidth, thinning: 0.2, smoothing: 0.8, streamline: 0.8,
+          simulatePressure: e.nativeEvent.pointerType !== 'pen'
+        });
+        const pathData = getSvgPathFromStroke(stroke);
+        const path = new Path2D(pathData);
+        pCtx.fillStyle = penColor; pCtx.fill(path);
       }
       clearTimeout(holdTimeout.current);
       holdTimeout.current = setTimeout(() => { if (isDrawing.current && !isSnapped.current) snapShape(); }, 600);
@@ -291,6 +305,7 @@ function EbookReader() {
     setDrawings(prev => { const next = { ...prev }; delete next[index]; queueUpdate({ drawings: next }); return next; });
   };
 
+  // --- Highlighter Logic ---
   const handleMouseUp = (index) => {
     if (!isHighlightMode) return;
     const selection = window.getSelection();
