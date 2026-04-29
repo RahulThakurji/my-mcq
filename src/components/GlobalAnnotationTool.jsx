@@ -457,7 +457,7 @@ export function CanvasOverlay({
                 onPointerCancel={(e) => {
                     activePointers.current.delete(e.pointerId); abortDrawing();
                 }}
-                style={{ position: "absolute", top: 0, left: 0, zIndex: isDrawingMode ? zIndex + 1 : 2, pointerEvents: isDrawingMode ? 'auto' : 'none', opacity: 1, touchAction: 'none', userSelect: 'none', WebkitUserSelect: 'none' }}
+                style={{ position: "absolute", top: 0, left: 0, zIndex: isDrawingMode ? zIndex + 1 : 2, pointerEvents: isDrawingMode ? 'auto' : 'none', opacity: 1, touchAction: isDrawingMode ? 'pinch-zoom' : 'auto', userSelect: 'none', WebkitUserSelect: 'none' }}
             />
         </>
     );
