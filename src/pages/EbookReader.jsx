@@ -60,7 +60,7 @@ function EbookReader() {
   const strokePoints = useRef([]);
   const holdTimeout = useRef(null);
   const activePointerType = useRef(null);
-  const activePointers = useRef(new Set());
+  const activePointers = useRef(new Map()); // ID -> Type
   const isHighlightErased = useRef(false);
   const lastPos = useRef({ x: 0, y: 0 });
 
@@ -488,11 +488,37 @@ function EbookReader() {
         </div>
         
         <div id="content-area" ref={contentAreaRef} 
-          onPointerDown={(e) => { activePointers.current.add(e.pointerId); if (activePointers.current.size > 1) { abortDrawing(); return; } if (isDrawingMode) { try { e.currentTarget.setPointerCapture(e.pointerId); } catch { } startDrawing(e); } }}
-          onPointerMove={(e) => { if (activePointers.current.size > 1) { abortDrawing(); return; } if (isDrawing.current) draw(e); }}
-          onPointerUp={(e) => { activePointers.current.delete(e.pointerId); if (isDrawing.current) { try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { } stopDrawing(); } }}
-          onPointerLeave={(e) => { if (isDrawing.current && activePointers.current.size <= 1) stopDrawing(); }}
-          onPointerCancel={(e) => { activePointers.current.delete(e.pointerId); abortDrawing(); }}
+          onPointerDown={(e) => { 
+            activePointers.current.set(e.pointerId, e.pointerType);
+            const touches = Array.from(activePointers.current.values()).filter(t => t === 'touch');
+            const pens = Array.from(activePointers.current.values()).filter(t => t === 'pen');
+            
+            if (touches.length > 1) { abortDrawing(); return; }
+            if (isDrawingMode) {
+              if (e.pointerType === 'touch' && pens.length > 0) return;
+              try { e.currentTarget.setPointerCapture(e.pointerId); } catch { }
+              startDrawing(e); 
+            } 
+          }}
+          onPointerMove={(e) => { 
+            const touches = Array.from(activePointers.current.values()).filter(t => t === 'touch');
+            if (touches.length > 1) { abortDrawing(); return; }
+            if (isDrawing.current) draw(e); 
+          }}
+          onPointerUp={(e) => { 
+            activePointers.current.delete(e.pointerId); 
+            if (isDrawing.current) { 
+              try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { } 
+              stopDrawing(); 
+            } 
+          }}
+          onPointerLeave={(e) => { 
+            if (isDrawing.current && activePointers.current.size <= 1) stopDrawing(); 
+          }}
+          onPointerCancel={(e) => { 
+            activePointers.current.delete(e.pointerId); 
+            abortDrawing(); 
+          }}
           style={{ fontSize: '1.1rem', position: 'relative', touchAction: isDrawingMode ? 'pinch-zoom' : 'auto' }}
         >
           {chapterData.content.map((item, index) => renderContent(item, index))}
