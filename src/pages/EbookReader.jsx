@@ -63,6 +63,7 @@ function EbookReader() {
   const activePointers = useRef(new Map()); // ID -> Type
   const isHighlightErased = useRef(false);
   const lastPos = useRef({ x: 0, y: 0 });
+  const drawingPointerId = useRef(null);
 
   const pendingUpdatesRef = useRef({});
 
@@ -206,6 +207,7 @@ function EbookReader() {
     if (activeMenu) setActiveMenu(null);
     if (activePointerType.current === 'pen' && nativeEvent.pointerType === 'touch') return;
     activePointerType.current = nativeEvent.pointerType;
+    drawingPointerId.current = nativeEvent.pointerId;
     const canvas = canvasRef.current; if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
     const offsetX = nativeEvent.clientX - rect.left; const offsetY = nativeEvent.clientY - rect.top;
@@ -242,7 +244,7 @@ function EbookReader() {
   };
 
   const draw = (e) => {
-    if (!isDrawing.current) return;
+    if (!isDrawing.current || e.nativeEvent.pointerId !== drawingPointerId.current) return;
     const canvas = canvasRef.current; const rect = canvas.getBoundingClientRect();
     const offsetX = e.nativeEvent.clientX - rect.left; const offsetY = e.nativeEvent.clientY - rect.top;
     strokePoints.current.push({ x: offsetX, y: offsetY, pressure: e.nativeEvent.pressure || 0.5 });
@@ -329,7 +331,8 @@ function EbookReader() {
   };
 
   const stopDrawing = (e) => {
-    if (!isDrawing.current) return;
+    if (!isDrawing.current || (e && e.nativeEvent.pointerId !== drawingPointerId.current)) return;
+    drawingPointerId.current = null;
     clearTimeout(holdTimeout.current);
     
     // Tap-to-interact logic from Quiz.jsx
@@ -536,6 +539,7 @@ function EbookReader() {
               <canvas 
                 ref={previewCanvasRef} 
                 onPointerDown={(e) => { 
+                  e.preventDefault();
                   activePointers.current.set(e.pointerId, e.pointerType);
                   const touches = Array.from(activePointers.current.values()).filter(t => t === 'touch');
                   const pens = Array.from(activePointers.current.values()).filter(t => t === 'pen');
@@ -547,11 +551,13 @@ function EbookReader() {
                   } 
                 }}
                 onPointerMove={(e) => { 
+                  e.preventDefault();
                   const touches = Array.from(activePointers.current.values()).filter(t => t === 'touch');
                   if (touches.length > 1) { abortDrawing(); return; }
                   if (isDrawing.current) draw(e); 
                 }}
                 onPointerUp={(e) => { 
+                  e.preventDefault();
                   activePointers.current.delete(e.pointerId); 
                   if (isDrawing.current) { 
                     try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { } 
