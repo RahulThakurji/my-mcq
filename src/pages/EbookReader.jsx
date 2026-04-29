@@ -207,11 +207,8 @@ function EbookReader() {
     if (activePointerType.current === 'pen' && nativeEvent.pointerType === 'touch') return;
     activePointerType.current = nativeEvent.pointerType;
     const canvas = canvasRef.current; if (!canvas) return;
-    const rect = canvas.getBoundingClientRect();
-    const offsetX = nativeEvent.clientX - rect.left; const offsetY = nativeEvent.clientY - rect.top;
-    const ctx = canvas.getContext('2d');
-    
     isSnapped.current = false; startX.current = offsetX; startY.current = offsetY;
+    lastPos.current = { x: nativeEvent.clientX, y: nativeEvent.clientY };
     const state = ctx.getImageData(0, 0, canvas.width, canvas.height);
     preStrokeSnapshot.current = state; snapshot.current = state;
     
@@ -221,6 +218,23 @@ function EbookReader() {
     
     strokePoints.current = [{ x: offsetX, y: offsetY, pressure: nativeEvent.pressure || 0.5 }];
     isDrawing.current = true; updateHistoryState();
+
+    // Fix: Restore preview canvas initialization for the Pen tool
+    const pCanvas = previewCanvasRef.current;
+    if (pCanvas) {
+      const ratio = window.devicePixelRatio || 1;
+      if (pCanvas.width !== canvas.width || pCanvas.height !== canvas.height) {
+        pCanvas.width = canvas.width;
+        pCanvas.height = canvas.height;
+        pCanvas.style.width = canvas.style.width;
+        pCanvas.style.height = canvas.style.height;
+      }
+      const pCtx = pCanvas.getContext('2d');
+      pCtx.imageSmoothingEnabled = false;
+      pCtx.setTransform(1, 0, 0, 1, 0, 0);
+      pCtx.scale(ratio, ratio);
+      pCtx.clearRect(0, 0, canvas.width, canvas.height);
+    }
   };
 
   const draw = (e) => {
