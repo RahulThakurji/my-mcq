@@ -6,8 +6,6 @@ import LatexRenderer from '../components/LatexRenderer';
 import { doc, setDoc, updateDoc, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
 import { useAuth } from '../context/AuthContext';
-import GlobalCanvas from '../components/GlobalCanvas';
-import AnnotationToolbar from '../components/AnnotationToolbar';
 
 function EbookReader() {
   const { ebookId, chapterId } = useParams();
@@ -15,16 +13,9 @@ function EbookReader() {
   const { user } = useAuth();
 
   // --- States ---
-  const [isDrawingMode, setIsDrawingMode] = useState(false);
   const [isHighlightMode, setIsHighlightMode] = useState(false);
-  const [drawTool, setDrawTool] = useState('pen');
-  const [penColor, setPenColor] = useState('#FF003C');
-  const [penWidth, setPenWidth] = useState(3);
   const [activeMenu, setActiveMenu] = useState(null);
-  const [eraserMode, setEraserMode] = useState('precision');
-  const [strokes, setStrokes] = useState([]); 
   const [savedContent, setSavedContent] = useState({}); 
-  const [historyState, setHistoryState] = useState({ undo: 0, redo: 0 });
   const [isInitialLoadComplete, setIsInitialLoadComplete] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
@@ -49,11 +40,10 @@ function EbookReader() {
     const unsubscribe = onSnapshot(docRef, (docSnap) => {
       if (docSnap.exists() && !docSnap.metadata.hasPendingWrites) {
         const data = docSnap.data();
-        if (data.strokes !== undefined) setStrokes(data.strokes || []);
         if (data.savedContent !== undefined) setSavedContent(data.savedContent);
       } else if (!docSnap.exists()) {
-        setStrokes([]); setSavedContent({});
-        setDoc(docRef, { strokes: [], savedContent: {} }).catch(() => {});
+        setSavedContent({});
+        setDoc(docRef, { savedContent: {} }).catch(() => {});
       }
       setIsInitialLoadComplete(true);
     }, () => setIsInitialLoadComplete(true));
@@ -73,7 +63,6 @@ function EbookReader() {
     try {
       const docRef = doc(db, 'users', user.uid, 'ebooks', `${ebookId}-${chapterId}`);
       await updateDoc(docRef, { 
-        strokes: strokes,
         savedContent: savedContent,
         lastUpdated: new Date()
       });
@@ -137,21 +126,8 @@ function EbookReader() {
   return (
     <div style={{ minHeight: '100vh', background: '#f8f9fa', paddingBottom: '100px', userSelect: 'none' }}>
       <div style={{ position: 'fixed', bottom: '30px', left: '50%', transform: 'translateX(-50%)', zIndex: 10001 }}>
-        <AnnotationToolbar 
-          isDrawingMode={isDrawingMode} setIsDrawingMode={setIsDrawingMode}
-          drawTool={drawTool} setDrawTool={setDrawTool}
-          penColor={penColor} setPenColor={setPenColor}
-          penWidth={penWidth} setPenWidth={setPenWidth}
-          eraserMode={eraserMode} setEraserMode={setEraserMode}
-          canUndo={historyState.undo > 0}
-          handleUndo={() => canvasRef.current?.undo()}
-          canRedo={historyState.redo > 0}
-          handleRedo={() => canvasRef.current?.redo()}
-          onClear={() => canvasRef.current?.clear()}
-          activeMenu={activeMenu} setActiveMenu={setActiveMenu}
-        />
-        <div style={{ marginTop: '8px', display: 'flex', gap: '8px', justifyContent: 'center' }}>
-          <button onClick={() => { setIsHighlightMode(!isHighlightMode); setIsDrawingMode(false); setActiveMenu(null); }} style={tb.pill(isHighlightMode, '#ff9f43', '#ee5a24')}>🖍️ Highlighter</button>
+        <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', background: 'rgba(23, 25, 35, 0.85)', backdropFilter: 'blur(12px)', padding: '8px 12px', borderRadius: '16px', border: '1px solid rgba(255,255,255,0.1)' }}>
+          <button onClick={() => { setIsHighlightMode(!isHighlightMode); setActiveMenu(null); }} style={tb.pill(isHighlightMode, '#ff9f43', '#ee5a24')}>🖍️ Highlighter</button>
           <button onClick={manualSaveToCloud} style={tb.pill(hasUnsavedChanges, '#ff9800', '#e67e22')} disabled={isSaving}>{isSaving ? '⏳' : '💾'} {hasUnsavedChanges ? 'Save' : 'Saved'}</button>
         </div>
       </div>
@@ -165,35 +141,10 @@ function EbookReader() {
         <div id="content-area" ref={contentAreaRef} 
           style={{ 
             fontSize: '1.1rem', 
-            position: 'relative', 
-            touchAction: isDrawingMode ? 'pinch-zoom' : 'auto',
-            userSelect: isDrawingMode ? 'none' : 'auto',
-            WebkitUserSelect: isDrawingMode ? 'none' : 'auto',
-            WebkitTouchCallout: 'none'
+            position: 'relative'
           }}
         >
           {chapterData.content.map((item, index) => renderContent(item, index))}
-          {isInitialLoadComplete && (
-             <GlobalCanvas 
-                containerRef={contentAreaRef}
-                isDrawingMode={isDrawingMode}
-                drawTool={drawTool}
-                penColor={penColor}
-                penWidth={penWidth}
-                eraserMode={eraserMode}
-                strokes={strokes}
-                setStrokes={(newStrokes) => {
-                   setStrokes(newStrokes);
-                   setHasUnsavedChanges(true);
-                }}
-                onTap={(e) => {
-                  const { clientX, clientY } = e.nativeEvent;
-                  const elements = document.elementsFromPoint(clientX, clientY);
-                  const targetBtn = elements.find(el => el.tagName === 'BUTTON' || el.getAttribute('role') === 'button');
-                  if (targetBtn) targetBtn.click();
-                }}
-             />
-          )}
         </div>
 
         <div style={{ marginTop: '4rem', paddingTop: '2rem', borderTop: '1px solid #eee', display: 'flex', justifyContent: 'space-between' }}>
